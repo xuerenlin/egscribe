@@ -1,0 +1,43 @@
+[package]
+name = "egscribe"
+version = "0.1.0"
+authors = ["Linxr <linxr.2005@163.com>"]
+license = "MIT"
+edition = "2021"
+rust-version = "1.76"
+publish = false
+
+
+[dependencies]
+#
+# 29.01 disable Ime Event in linux, so we use 28.01
+#
+eframe = { version = "0.28.1",  features = [
+    "default",
+    "__screenshot", # __screenshot is so we can dump a screenshot using EFRAME_SCREENSHOT_TO
+] }
+
+egui_extras = { version = "0.28.1",  features = [ "default", "all_loaders"]}
+
+env_logger = "0.10"
+dyn-clone = "1.0.17"
+markdown = "1.0.0-alpha.21"
+regex = "*"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+arboard = "3.5"
+image = "0.25.6"
+uuid = { version = "1.7", features = ["v7"] }
+
+# 
+# tree-sitter
+#
+tree-sitter = "0.20.10"
+tree-sitter-highlight = "0.20.1"
+tree-sitter-javascript = "0.20.4"
+tree-sitter-c = "0.20.8"
+tree-sitter-rust = "0.20.4"
+tree-sitter-go = "0.20.0"
+tree-sitter-bash = "0.20.5"
+tree-sitter-json = "0.20.2"
+

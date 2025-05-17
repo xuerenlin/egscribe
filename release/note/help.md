@@ -1,0 +1,42 @@
+# HEAD1 标题1
+- 普通的样式: normal
+- **粗体: strong**
+- *斜体: italics*
+- ~~删除: delete~~
+- _下划线: underline_
+- 各种样式 **粗体:strong** and *斜体:italics* and ~~删除:delete~~
+- 样式嵌套 ***~~嵌套1~~*** **strong*italics~~delete~~*** 
+- 行中代码: `int main(){}`
+- 链接: [Link](http://www.hello.com.cn)
+- 链接: [*ItalicsLink*](http://www.hello.com.cn)
+- 链接: [[test]]
+## HEAD2 标题2  
+这是一段普通的内容  
+这是新的一行  
+又是一行，测试行之间间距是否合理, dnf install clang clang-devel clang-tools-extra libxkbcommon-devel pkg-config openssl-devel libxcb-devel gtk3-devel atk fontconfig-devel  
+下面是个分割线---  
+### Table  
+|序号|方案|描述|备注|
+|--|--|--|--|
+|1|直连Agent|38|this is one cell with long long contents, and chek info|
+|2|直连Serv|37|xxx|
+|3|改造Proxy节点|8|unknow|
+|4|使用Go独立节点|5|unknow|
+  
+else  
+### HEAD3 标题3 Blockquote
+>Test1 
+>Test2
+>Test3
+#### *HEAD4 斜体标题4* TODO List
+- [x] todo1 **strong**阿斯蒂芬  啥打法胜多负少的阿斯蒂
+- [x] todo2 *italics*
+- [x] todo3 ~~delete~~
+- [ ] x
+##### ~~HEAD5 删除标题5~~ Normal List
+- todo1 **strong**
+- todo2 *italics*
+- todo3 ~~delete~~
+- x
+###### HEAD6 标题6  
+thanks
