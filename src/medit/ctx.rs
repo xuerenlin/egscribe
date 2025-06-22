@@ -30,6 +30,7 @@ pub struct State {
 
     content_change_tick: u64,
     ime_area_changed: bool,
+    ime_actived: bool,
 }
 
 impl Default for State {
@@ -47,6 +48,7 @@ impl Default for State {
             selecting: false,
             content_change_tick: 0,
             ime_area_changed: false,
+            ime_actived: false,
         }
     }
 }
@@ -1368,6 +1370,15 @@ impl Ctx {
 
     pub fn is_ime_area_changed(&self) -> bool {
         self.state.ime_area_changed
+    }
+
+    pub fn set_ime_actived(&mut self, flag: bool) {
+        log::debug!("set_ime_actived {}", flag);
+        self.state.ime_actived = flag;
+    }
+
+    pub fn is_ime_actived(&self) -> bool {
+        self.state.ime_actived
     }
 
     pub fn font_size(&self) -> f32 {

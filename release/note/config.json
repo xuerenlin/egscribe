@@ -1,26 +1,34 @@
 {
   "show_line_no": true,
   "show_index_window": true,
-  "wrap": false,
+  "wrap": true,
   "font_size": 16.0,
-  "dark_mode": true,
-  "current_file": "untitled_1",
-  "fixed_files": [],
+  "indent_size": 16.0,
+  "dark_mode": false,
+  "current_file": "help",
+  "fixed_files": [
+    "daily",
+    "help"
+  ],
   "opend_files": [
-    "untitled_1"
+    "help"
   ],
   "tree_open_state": {
-    "untitled_3": true,
-    "help": true,
-    "2025-02-04": true,
-    "untitled_2": true,
-    "2025-02-05": true,
-    "test": true,
     "2025-02-06": true,
+    "basic": true,
+    "2025-02-04": true,
+    "help_test_newfile": true,
+    "help": true,
+    "help.01": true,
     ".": true,
-    "daily": true,
+    "2025-02-05": true,
+    "untitled_1": true,
+    "blender": true,
+    "untitled_2": true,
+    "基本操作": true,
     "read": true,
-    "untitled_1": true
+    "untitled_3": true,
+    "daily": true
   },
   "tree_open_state_changed": true
 }

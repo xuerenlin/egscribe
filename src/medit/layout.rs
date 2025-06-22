@@ -329,9 +329,8 @@ impl Widget for Edit<'_> {
             };
             ui.memory_mut(|mem| mem.set_focus_lock_filter(response.id, event_filter));
             let events = ui.input(|i| i.filtered_events(&event_filter));
-            for event in &events {
-                Self::on_event(ui, &mut self.ctx, event);
-            }
+            Self::process_all_event(ui, &mut self.ctx, events);
+            
             //compare state and mark_state_change after process event
             self.ctx.mark_state_change(bak_state);
 
@@ -413,6 +412,9 @@ impl Edit<'_> {
     }
 
     fn on_key_event(ui: &mut Ui, ctx: &mut Ctx, event: &Event) -> bool {
+        if ctx.is_ime_actived() {
+            return false;
+        }
         match event {
             Event::Key {
                 modifiers,
@@ -505,18 +507,22 @@ impl Edit<'_> {
             Event::Ime(ImeEvent::Commit(s)) => {
                 log::debug!("{:?}", event);
                 ctx.insert(s.clone());
+                ctx.set_ime_actived(false);
                 return true;
             }
             Event::Ime(ImeEvent::Enabled) => {
                 log::debug!("{:?}", event);
+                ctx.set_ime_actived(true);
                 return true;
             }
             Event::Ime(ImeEvent::Preedit(s)) => {
                 log::debug!("{:?}", event);
+                ctx.set_ime_actived(true);
                 return true;
             }
             Event::Ime(ImeEvent::Disabled) => {
                 log::debug!("{:?}", event);
+                ctx.set_ime_actived(false);
                 return true;
             }
             _ => {
@@ -526,6 +532,7 @@ impl Edit<'_> {
     }
 
     fn on_text_event(ui: &mut Ui, ctx: &mut Ctx, event: &Event) -> bool {
+        let mut is_text_input = false;
         match event {
             Event::Copy => {
                 let text = ctx.get_selected_text();
@@ -549,6 +556,7 @@ impl Edit<'_> {
             Event::Text(text_to_insert) => {
                 log::debug!("{:?}", event);
                 ctx.insert(text_to_insert.clone());
+                is_text_input = true;
             }
 
             Event::Key {
@@ -557,6 +565,15 @@ impl Edit<'_> {
                 modifiers,
                 ..
             } => {
+                if modifiers.ctrl {
+                    match key {
+                        Key::A => ctx.set_cursors_select_all(), //ctrl+a select all
+                        Key::Z => ctx.undo(), //ctrl+z undo
+                        Key::Y => ctx.redo(), //ctrl+y redo
+                        Key::S => {} //ctrl+s save
+                        _=> {}
+                    }
+                }
                 match key {
                     Key::Tab => {
                         //todo
@@ -566,23 +583,6 @@ impl Edit<'_> {
                     }
                     Key::Enter => {
                         ctx.enter(modifiers.ctrl);
-                    }
-                    Key::A if modifiers.ctrl => {
-                        //ctrl+a select all
-                        ctx.set_cursors_select_all();
-                    }
-                    Key::Z if modifiers.ctrl => {   
-                        //ctrl+z undo
-                        ctx.undo();
-                    }
-                    Key::Y if modifiers.ctrl => {   
-                        //ctrl+y redo
-                        ctx.redo();
-                    }
-                    Key::S if modifiers.ctrl => {   
-                        //ctrl+s save
-                        //todo
-                        println!("ctrl+s in editor");
                     }
                     _ => {}
                 }
@@ -602,8 +602,56 @@ impl Edit<'_> {
 
     fn on_event(ui: &mut Ui, ctx: &mut Ctx, event: &Event) {
         Self::on_mouse_event(ui, ctx, event);
+        Self::on_text_event(ui, ctx, event); 
         Self::on_key_event(ui, ctx, event);
         Self::on_ime_event(ui, ctx, event);
-        Self::on_text_event(ui, ctx, event); 
+    }
+
+    fn event_is_char_key(event: &Event) -> bool {
+        matches!(
+            event,
+            Event::Key {
+                key: Key::A|Key::B|Key::C|Key::D|Key::E|Key::F|Key::G|Key::H|Key::I|Key::J|Key::K|Key::L|Key::M|Key::N|
+                     Key::O|Key::P|Key::Q|Key::R|Key::S|Key::T|Key::U|Key::V|Key::W|Key::X|Key::Y|Key::Z, ..
+            }
+        )
+    }
+
+    fn event_is_text(event: &Event) -> bool {
+        matches!(
+            event,
+            Event::Text(_)
+        )
+    }
+
+    fn process_all_event(ui: &mut Ui, ctx: &mut Ctx, events: Vec<Event>) {
+        let mut is_char = false;
+        let mut is_text = false;
+
+        if events.len() == 0 {
+            return;
+        }
+
+        for event in &events {
+            if Self::event_is_char_key(event) {
+                is_char = true;
+            }
+            if Self::event_is_text(event) {
+                is_text = true;
+            }
+            Self::on_event(ui, ctx, event);
+        }
+
+        //get char-key input, but not get the text event, maybe the ime is active(chinese sougou-pinyin ime)
+        /* 
+        log::debug!("is_char={} is_test={} is_actived={}", is_char, is_text, ctx.is_ime_actived());
+        if is_char && !is_text {
+            ctx.set_ime_actived(true);
+        } 
+        
+        if is_text && ctx.is_ime_actived() {
+            ctx.set_ime_actived(false);
+        }
+        */
     }
 }
