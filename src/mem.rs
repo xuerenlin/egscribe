@@ -1,7 +1,8 @@
 use serde::{Serialize, Deserialize};
 use crate::sitter;
-use crate::space::{CurFile, NoteSpace};
-use crate::medit::{Command, Ctx, FindCmd};
+use crate::space::{UniFile, NoteSpace};
+use crate::medit::{Command, Ctx, FindCmd, FindReplaceCtx, Cursor};
+use crate::find::FindWindow;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::usize;
@@ -12,6 +13,7 @@ pub struct Config {
     pub show_index_window: bool,
     pub wrap: bool,
     pub font_size: f32,
+    pub indent_size: f32,
     pub dark_mode: bool,
     pub current_file: String,
     pub fixed_files: Vec<String>,
@@ -27,6 +29,7 @@ impl Config {
             show_index_window: true,
             wrap: false,
             font_size: 16.0,
+            indent_size: 16.0,
             dark_mode: true,
             current_file: String::new(),
             fixed_files: vec![],
@@ -71,9 +74,10 @@ impl ToolBarInfo {
 
 pub struct Store {
     pub config: Config,
-    pub ectx_map: HashMap<CurFile, Ctx>,
+    pub ectx_map: HashMap<UniFile, Ctx>,
     pub note_space: NoteSpace,
     pub tool_bar_info: ToolBarInfo,
+    pub find_window: FindWindow,
 }
 
 impl Store {
@@ -83,17 +87,19 @@ impl Store {
             note_space: NoteSpace::new(),
             config: Config::default(),
             tool_bar_info: ToolBarInfo::default(),
+            find_window: FindWindow::new(),
         };
         store.config_restore();
         store
     }
     
-    pub fn cur_edit_ctx_mut(&mut self) -> Option<&mut Ctx> {
+    pub fn cur_edit_ctx_mut(&mut self) -> Option<(UniFile, &mut Ctx)> {
         if let Some(curfile) = self.note_space.get_current_cur() {
-            self.ectx_map.get_mut(&curfile)
-        } else {
-            None
+            if let Some(ctx) = self.ectx_map.get_mut(&curfile) {
+                return Some((curfile, ctx))
+            }
         }
+        None
     }
 
     pub fn is_cur_content_changed(&self) -> bool {
@@ -110,9 +116,10 @@ impl Store {
         edit_ctx.cfg_mut().wrap = config.wrap;
         edit_ctx.cfg_mut().dark_mode = config.dark_mode;
         edit_ctx.set_font_size(config.font_size);
+        edit_ctx.set_indent_size(config.indent_size);
     }
 
-    pub fn open_set_ctx(&mut self, curfile: &CurFile) {
+    pub fn open_set_ctx(&mut self, curfile: &UniFile) {
         if let Some(edit_ctx) = self.ectx_map.get_mut(&curfile) {
             edit_ctx.set_open_time();
             Self::set_edit_cfg(&self.config, edit_ctx);
@@ -122,7 +129,7 @@ impl Store {
     }
 
     pub fn open_note(&mut self, name: &str) -> std::io::Result<String> {
-        let curfile = self.note_space.note_name_to_curfile(name);
+        let curfile = self.note_space.note_name_to_unifile(name);
 
         // file isn't exist, create first
         if !self.note_space.is_file_exist(name) {
@@ -153,7 +160,7 @@ impl Store {
     }  
 
     pub fn open_file(&mut self, name: &str) -> std::io::Result<String> {
-        let curfile = CurFile::from(name);
+        let curfile = UniFile::from(name);
         let text = std::fs::read_to_string(name)?;
         
         // check new ctx
@@ -188,8 +195,19 @@ impl Store {
         }
     }
 
-    pub fn close(&mut self, file: &CurFile) {
-        println!("close {:?}", file);
+    pub fn open_unifile(&mut self, unifile: &UniFile) -> std::io::Result<String> {
+        match unifile {
+            UniFile::File(_) => {
+                self.open_file(&unifile.path())
+            }
+            UniFile::Note(_) => {
+                self.open_note(&unifile.name())
+            }
+        }
+    }
+
+    pub fn close(&mut self, file: &UniFile) {
+        log::debug!("close {:?}", file);
         if self.ectx_map.len() > 1 {
             // remove firstly
             self.ectx_map.remove(file);
@@ -200,7 +218,7 @@ impl Store {
                 time1.cmp(&time2)
             });
             if let Some((last_file,_)) = last_file {
-                println!("open {:?}", last_file);
+                log::debug!("open {:?}", last_file);
                 self.open_set_ctx(&last_file.clone());
             }
         }
@@ -292,20 +310,42 @@ impl Store {
         Ok(())
     }
 
-    pub fn execute_goto(&mut self, line_text: String) {
-        let arr: Vec<&str> = line_text.trim().split(' ').collect();
-        if let Some(line_no) = arr.first() {
-            if let Ok(no) = line_no.parse::<usize>() {
-                if no > 0 {
-                    if let Some(cur_edit) = self.cur_edit_ctx_mut() {
-                        cur_edit.set_cursor2((no-1).into());
-                        cur_edit.set_cursor1_reset();
+    pub fn execute_goto(&mut self, line_text: String, dead_loop: usize) {
+        if dead_loop > 1 {
+            return;
+        }
+        if let Some(find_file) = self.find_window.find_file.clone() {
+            let arr: Vec<&str> = line_text.trim().split('.').collect();
+            if arr.len() < 3 {
+                return;
+            }
+            let curosr:Cursor = (arr[0].parse::<usize>().unwrap(), arr[1].parse::<usize>().unwrap(), arr[2].parse::<usize>().unwrap()).into();
+            if let Some((uni_file,cur_edit)) = self.cur_edit_ctx_mut() {
+                if find_file == uni_file {
+                    cur_edit.set_cursor2(curosr);
+                    cur_edit.set_cursor1_reset();
+                } else {
+                    if self.open_unifile(&find_file).is_ok() {
+                        self.execute_goto(line_text, dead_loop+1);
                     }
                 }
             }
         }
     }
     
+    pub fn execute_find(&mut self, find: FindReplaceCtx) {
+        self.execute_cmd(Command::FindReplace(find));
+        let dark_mode = self.config.dark_mode;
+        
+        let (uni_file, find_cache, find_param) = if let Some((uni_file, edit_ctx)) = self.cur_edit_ctx_mut() {
+            let (find_cache, find_param) = edit_ctx.get_find_cache();
+               (uni_file, find_cache.clone(), find_param.clone())
+        } else {
+            return;
+        };
+        self.find_window.set_find_result(uni_file, &find_cache, &find_param, dark_mode);
+    }
+
     pub fn execute_cmd(&mut self, cmd: Command) {
         match cmd {
             Command::OpenFile(file) => {
@@ -313,7 +353,7 @@ impl Store {
             }
             Command::PathList(parent) => {
                 let links = self.note_space.get_child_links(&parent);
-                println!("{:?}", links);
+                log::debug!("{:?}", links);
             }
             Command::DeleteFile(file) => {
                 let _= self.delete_file(&file);
@@ -331,13 +371,13 @@ impl Store {
                 self.config_unfixed_file(file);
             }
             Command::ClickEditLine(line) => {
-                self.execute_goto(line);
+                self.execute_goto(line, 0);
             }
             Command::OpenUrl(_url) => {
             }
             Command::FindReplace(mut param) => {
                 param.regex_build();
-                if let Some(edit_ctx) = self.cur_edit_ctx_mut() {
+                if let Some((_unifile, edit_ctx)) = self.cur_edit_ctx_mut() {
                     if let Some(find_cmd) = param.cmd.clone() {
                         match find_cmd {
                             FindCmd::Find => {
@@ -393,7 +433,7 @@ impl Store {
         }
     }
 
-    pub fn config_set_current_file(&mut self, curfile: &CurFile) {
+    pub fn config_set_current_file(&mut self, curfile: &UniFile) {
         if curfile.is_file() {
             self.config.current_file = curfile.path();
         } else {
@@ -438,6 +478,17 @@ impl Store {
         self.config_save();
     }
 
+    pub fn config_add_indent_size(&mut self, delta: f32) {
+        self.config.indent_size += delta;
+        if self.config.indent_size < 0.0 || self.config.indent_size > 100.0 {
+            self.config.indent_size = 0.0
+        }
+        for (_, ctx) in self.ectx_map.iter_mut() {
+            ctx.set_indent_size(self.config.indent_size);
+        }
+        self.config_save();
+    }
+
     pub fn config_update_show_index_window(&mut self, is_show: bool) {
         self.config.show_index_window = is_show;
         self.note_space.set_show_index_window(is_show);
@@ -455,7 +506,7 @@ impl Store {
 
         //restore current file
         if self.config.current_file.is_empty() {
-            let curfile = self.note_space.note_name_to_curfile("untitled_1");
+            let curfile = self.note_space.note_name_to_unifile("untitled_1");
             self.config_set_current_file(&curfile);
         }
         let current_file = self.config.current_file.clone();

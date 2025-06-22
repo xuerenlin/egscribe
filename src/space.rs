@@ -144,7 +144,6 @@ impl NoteSpace {
         ui.painter().circle_filled(response.rect.center(), 2.0, stroke.color);
     }
     
-    /// return if need open one file
     fn show_sub_index(&mut self, config: &mut Config, ui: &mut Ui, name: &str, deep: usize) -> Option<Command> {
         let mut cmd = None;
         if deep > 10 {
@@ -260,7 +259,6 @@ impl NoteSpace {
 
         let win_frame = Frame {
             fill: ui.style().visuals.window_fill(),
-            rounding: 3.0.into(),
             stroke: Stroke::new(1.0, ui.style().visuals.weak_text_color()),
             outer_margin: 0.0.into(),
             inner_margin: 0.0.into(),
@@ -364,23 +362,23 @@ pub struct FilePath {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum CurFile {
+pub enum UniFile {
     Note(FilePath),
     File(FilePath)
 }
 
-impl CurFile {
+impl UniFile {
     pub fn from(name: &str) -> Self {
         if name.contains("/") || name.contains("\\")  {
             if let Some(file_name) = PathBuf::from(name).file_name() {
-                return CurFile::File(
+                return UniFile::File(
                     FilePath{
                         name:file_name.to_string_lossy().to_string(),
                         path: name.to_string()
                 });
             } 
         }
-        return CurFile::Note(
+        return UniFile::Note(
             FilePath{
                 name: name.to_string(),
                 path: name.to_string()
@@ -389,7 +387,7 @@ impl CurFile {
 
     pub fn is_note(&self) -> bool {
         match self {
-            CurFile::Note(_) => true,
+            UniFile::Note(_) => true,
             _ => false,
         }
     }
@@ -400,33 +398,39 @@ impl CurFile {
 
     pub fn name(&self) -> String {
         return match self {
-            CurFile::File(file) => file.name.clone(),
-            CurFile::Note(note) => note.name.clone(),
+            UniFile::File(file) => file.name.clone(),
+            UniFile::Note(note) => note.name.clone(),
         };
     }
 
     pub fn path(&self) -> String {
         return match self {
-            CurFile::File(file) => file.path.clone(),
-            CurFile::Note(note) => note.path.clone(),
+            UniFile::File(file) => file.path.clone(),
+            UniFile::Note(note) => note.path.clone(),
         };
     }
 
     pub fn name4open(&self) -> String {
         return match self {
-            CurFile::File(file) => file.path.clone(),
-            CurFile::Note(note) => note.name.clone(),
+            UniFile::File(file) => file.path.clone(),
+            UniFile::Note(note) => note.name.clone(),
         };
     }
 }
 
+
+#[derive(Clone,Debug)]
+pub struct FileCache {
+    pub content: String,
+    pub links: Vec<String>,
+}
+
 pub struct NoteSpace {
     work_dir: PathBuf,
-    files: Vec<PathBuf>,
-    file_links: HashMap<String, Vec<String>>,
+    file_cache: HashMap<String, FileCache>,
     link_parents: HashMap<String, Vec<String>>,
     directory: Vec<DirNote>,
-    cur_file: Option<CurFile>,
+    cur_file: Option<UniFile>,
     rename_window: RenameWin,
     index_window: IndexWind,
 }
@@ -450,8 +454,7 @@ impl NoteSpace {
     pub fn new() -> Self {
         let mut space = Self {
             work_dir: PathBuf::from("./note"),
-            files: vec![],
-            file_links: HashMap::new(),
+            file_cache: HashMap::new(),
             link_parents: HashMap::new(),
             directory: vec![],
             cur_file: None,
@@ -479,44 +482,45 @@ impl NoteSpace {
         }
     }
 
-    fn set_files_in_word_dir(&mut self) {
-        let mut paths = vec![];
+    //return links of the file
+    fn get_file_links(&mut self, content: &str) -> Vec<String> {
+        let mut cfg = EditCfg::new(17.0, true, None);
+        let markdown = MarkDownImpl::new_simple(content, &mut cfg);
+        return markdown.markdown_get_links();
+    }
+
+    fn flash_file_cache(&mut self) {
+        let mut file_cache: HashMap<String, FileCache> = HashMap::new();
         if let Ok(dir) = fs::read_dir(self.work_dir.clone()) {
             for entry in dir{
                 if let Ok(entry) = entry {
-                    let path = entry.path();
-                    if path.is_file() && path.extension().map_or(false, |e| e == "md") {
-                        paths.push(path);
+                    let file_path = entry.path();
+                    let mut tmp_path = file_path.clone();
+                    if file_path.is_file() && file_path.extension().map_or(false, |e| e == "md") {
+                        if let Ok(content) = std::fs::read_to_string(file_path) {
+                            tmp_path.set_extension("");
+                            let file_name = tmp_path.file_name().unwrap().to_string_lossy().to_string();
+                            let links = self.get_file_links(&content);
+                            file_cache.insert(file_name, FileCache{content, links});
+                        }
                     }
                 }
             }
         }
-        self.files = paths;
+        self.file_cache = file_cache;
     }
 
-    //return map of file links
-    fn set_file_links(&mut self) {
-        let mut map: HashMap<String, Vec<String>> = HashMap::new();
-        for file in &self.files {
-            let mut links = vec![];
-            if let Ok(s) = std::fs::read_to_string(file.clone()) {
-                let mut cfg = EditCfg::new(17.0, true, None);
-                let markdown = MarkDownImpl::new_simple(&s, &mut cfg);
-                links = markdown.markdown_get_links();
-            }
-            let mut file_name = file.clone();
-            file_name.set_extension("");
-            let file_name = file_name.file_name().unwrap().to_str().unwrap().to_string();
-            map.insert(file_name, links);
+    fn update_file_cache(&mut self, file_name: &str, content: String) {
+        if let Some(cache) = self.file_cache.get_mut(file_name) {
+            cache.content = content;
         }
-        self.file_links = map;
     }
 
     //return map of link-parents
     fn set_link_parents(&mut self) {
         let mut map: HashMap<String, Vec<String>> = HashMap::new();
-        for (file, links) in &self.file_links {
-            for link in links {
+        for (file, cache) in &self.file_cache {
+            for link in &cache.links {
                 if let Some(parents) = map.get_mut(link) {
                     if !parents.contains(file) {
                         parents.push(file.to_string());
@@ -551,8 +555,7 @@ impl NoteSpace {
     }
 
     pub fn flash_data(&mut self) {
-        self.set_files_in_word_dir();
-        self.set_file_links();
+        self.flash_file_cache();
         self.set_link_parents();
         self.rebuild_directory();
     }
@@ -582,7 +585,7 @@ impl NoteSpace {
 
     fn get_root_files(&self) -> Vec<String> {
         let mut roots = vec![];
-        for (file, _) in &self.file_links {
+        for (file, _) in &self.file_cache {
             if None == self.link_parents.get(file) {
                 roots.push(file.clone());
             }
@@ -591,19 +594,19 @@ impl NoteSpace {
         roots
     }
 
-    pub fn note_name_to_curfile(&self, name: &str) -> CurFile {
+    pub fn note_name_to_unifile(&self, name: &str) -> UniFile {
         let path = "./".to_string() + &self.get_path_from_link_parents(name).join("/");
-        CurFile::Note(FilePath{
+        UniFile::Note(FilePath{
             name: name.to_string(), 
             path
         })
     }
 
-    pub fn set_current_file(&mut self, cur_file: &CurFile) {
+    pub fn set_current_file(&mut self, cur_file: &UniFile) {
         self.cur_file = Some(cur_file.clone());
     }
 
-    pub fn get_current_cur(&self) -> Option<CurFile> {
+    pub fn get_current_cur(&self) -> Option<UniFile> {
         self.cur_file.clone()
     }
 
@@ -640,8 +643,8 @@ impl NoteSpace {
     }
 
     pub fn get_child_links(&self, name: &str) -> Vec<String> {
-        if let Some(links) = self.file_links.get(name).cloned() {
-            return links;
+        if let Some(cache) = self.file_cache.get(name) {
+            return cache.links.clone();
         } else if name == "." {
             return self.get_root_files();
         }
@@ -690,9 +693,13 @@ impl NoteSpace {
         std::fs::read_to_string(path)
     }
 
-    pub fn write_note(&self, name: &str, text: &str) -> std::io::Result<()> {
+    pub fn write_note(&mut self, name: &str, text: &str) -> std::io::Result<()> {
         let path = self.name2path(name);
-        std::fs::write(path, text)
+        let result = std::fs::write(path, text);
+        if result.is_ok() {
+            self.update_file_cache(name, text.to_string());
+        }
+        result
     }
 
     pub fn write_file(&self, path: &str, text: &str) -> std::io::Result<()> {

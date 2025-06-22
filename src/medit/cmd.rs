@@ -1,5 +1,6 @@
 
 use regex::{Regex, RegexBuilder};
+use crate::medit::UrlInfo;     
 
 #[derive(Clone)]
 pub enum FindCmd {
@@ -63,5 +64,5 @@ pub enum Command {
     UnFixedFile(String),   
     FindReplace(FindReplaceCtx),   
     ClickEditLine(String),
-    OpenUrl(String),
+    OpenUrl(UrlInfo),
 }

@@ -2,6 +2,7 @@
 #![allow(rustdoc::missing_crate_level_docs)] // it's an example
 
 mod sitter;
+mod util;
 mod medit;
 mod toolbar;
 mod space;
@@ -11,7 +12,6 @@ mod find;
 use std::vec;
 use toolbar::{ToolBar, ToolBarType};
 use mem::Store;
-use find::FindWindow;
 use eframe::egui::{self, Color32, Stroke, Vec2};
 use eframe::egui::{Order, Rect, EventFilter, Ui, Event, Key, ScrollArea};
 
@@ -22,7 +22,7 @@ fn main() -> Result<(), eframe::Error> {
         file = args[1].clone();
     }
 
-    env_logger::init(); // Log to stderr (if you run with `RUST_LOG=debug`).
+    env_logger::init(); // Log to stderr (if you run with `RUST_LOG=debug` or $env:RUST_LOG="debug" in windows).
     let icon = eframe::icon_data::from_png_bytes(&include_bytes!("../fonts/egscribe.png")[..]).unwrap();
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
@@ -42,8 +42,8 @@ fn main() -> Result<(), eframe::Error> {
 
 struct MyApp {
     store: Store,
-    find_window: FindWindow,
-    dropped_files: Vec<egui::DroppedFile>
+    dropped_files: Vec<egui::DroppedFile>,
+    title: String
 }
 
 impl MyApp {
@@ -59,8 +59,8 @@ impl MyApp {
         }
         Self {
             store,
-            find_window: FindWindow::new(),
             dropped_files: vec![],
+            title: String::new()
         }
     }
 
@@ -89,9 +89,9 @@ impl MyApp {
                         }
                         Key::F if modifiers.ctrl => {   
                             //ctrl+f find
-                            if let Some(edit_ctx) = self.store.cur_edit_ctx_mut() {
+                            if let Some((_uni_file,edit_ctx)) = self.store.cur_edit_ctx_mut() {
                                 let selected = edit_ctx.get_selected_text();
-                                let _ = self.find_window.active(selected);
+                                let _ = self.store.find_window.active(selected);
                             }
                         }
                         Key::Escape => {
@@ -109,7 +109,6 @@ impl MyApp {
     fn edit_sub_window(&mut self, ctx: &egui::Context, in_rect: Rect, out_rect: Rect) {
         let win_frame = egui::Frame {
             fill: ctx.style().visuals.window_fill(),
-            rounding: 0.0.into(),
             stroke: Stroke::new(0.0, Color32::TRANSPARENT),
             outer_margin: 0.0.into(),
             inner_margin: 0.0.into(),
@@ -131,15 +130,25 @@ impl MyApp {
                     ui.add(ToolBar::new(&mut self.store, path_bar));
                 }
 
-                if let Some(edit_ctx) = self.store.cur_edit_ctx_mut() {
+                if let Some((_uni_file,edit_ctx)) = self.store.cur_edit_ctx_mut() {
                     ui.add(medit::Edit::new(edit_ctx));
                 }
             });
     }
 
+    pub fn update_title(&mut self, ctx: &egui::Context) {
+        if let Some(cur_name) = self.store.note_space.get_current_name() {
+            let title = "egscribe - ".to_string() + &cur_name;
+            if title != self.title {
+                self.title = title.clone();
+                ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
+            }
+        }
+    }
+
     pub fn exe_edit_cmd(&mut self) {
         let mut cmd_list = vec![];
-        if let Some(cur_ctx) = self.store.cur_edit_ctx_mut() {
+        if let Some((_uni_file, cur_ctx)) = self.store.cur_edit_ctx_mut() {
             while let Some(cmd) = cur_ctx.pop_cmd() {
                 cmd_list.insert(0, cmd);
             }
@@ -151,7 +160,7 @@ impl MyApp {
 
     pub fn exe_find_edit_cmd(&mut self) {
         let mut cmd_list = vec![];
-        let cur_ctx = &mut self.find_window.edit_ctx;
+        let cur_ctx = &mut self.store.find_window.edit_ctx;
         while let Some(cmd) = cur_ctx.pop_cmd() {
             cmd_list.insert(0, cmd);
         }
@@ -164,6 +173,7 @@ impl MyApp {
 //这是什么字体
 impl eframe::App for MyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.update_title(ctx);
 
         egui::TopBottomPanel::top("top")
             .show_separator_line(true)
@@ -209,10 +219,12 @@ impl eframe::App for MyApp {
                 .resizable(true)
                 .default_height(360.0)
                 .show(ctx, |ui|{
-                let title = format!("Find result: match {} items", self.find_window.edit_ctx.line_num());
-                ui.add(ToolBar::new(&mut self.store, ToolBarType::WinBar(title)));
-                ui.add(crate::medit::Edit::new(&mut self.find_window.edit_ctx));
-                self.exe_find_edit_cmd();
+                    let file_path = if let Some(unifile) = &self.store.find_window.find_file { unifile.path() } else {String::new()};
+                    let title = format!("Find result: match {} items in {}", 
+                        self.store.find_window.edit_ctx.line_num(), file_path);
+                    ui.add(ToolBar::new(&mut self.store, ToolBarType::WinBar(title)));
+                    ui.add(crate::medit::Edit::new(&mut self.store.find_window.edit_ctx));
+                    self.exe_find_edit_cmd();
             });
         }
 
@@ -238,12 +250,8 @@ impl eframe::App for MyApp {
             }
 
             //find window as top window 
-            if let Some(find) = self.find_window.show(ui) {
-                self.store.execute_cmd(medit::Command::FindReplace(find));
-                if let Some(edit_ctx) = self.store.cur_edit_ctx_mut() {
-                    let (find_cache, find_param) = edit_ctx.get_find_cache();
-                    self.find_window.set_find_result(find_cache, find_param);
-                }
+            if let Some(find) = self.store.find_window.show(ui) {
+                self.store.execute_find(find);
             }
 
             //hot keys
@@ -316,22 +324,22 @@ fn load_fonts(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();
     fonts.font_data.insert(
         "msyhl".to_owned(),
-        egui::FontData::from_static(include_bytes!("../fonts/msyhl.ttc")),
+        egui::FontData::from_static(include_bytes!("../fonts/msyhl.ttc")).into(),
     );
 
     fonts.font_data.insert(
         "msyhb".to_owned(),
-        egui::FontData::from_static(include_bytes!("../fonts/msyhbd.ttc")),
+        egui::FontData::from_static(include_bytes!("../fonts/msyhbd.ttc")).into(),
     );
 
     fonts.font_data.insert(
         "icon".to_owned(),
-        egui::FontData::from_static(include_bytes!("../fonts/icomoon/fonts/icomoon.ttf")),
+        egui::FontData::from_static(include_bytes!("../fonts/icomoon/fonts/icomoon.ttf")).into(),
     );
 
     fonts.font_data.insert(
         "courier".to_owned(),
-        egui::FontData::from_static(include_bytes!("../fonts/cour.ttf")),
+        egui::FontData::from_static(include_bytes!("../fonts/cour.ttf")).into(),
     );
 
 

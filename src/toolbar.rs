@@ -1,10 +1,10 @@
 use core::f32;
 use std::sync::Arc;
-use eframe::egui::{Button, Color32, FontId, Galley, Rect, Response, Sense, Ui, Visuals, Widget};
+use eframe::egui::{Button, Color32, FontId, Galley, Rect, Response, Sense, Ui, Widget};
 
 use crate::medit::{IconName, PghText};
 use crate::mem::Store;
-use crate::space::CurFile;
+use crate::space::UniFile;
 
 pub enum ToolBarType {
     PathBar(String),
@@ -153,7 +153,14 @@ impl ToolBar<'_> {
                 Self::font_size_menus(store, ui)
             })
             .response.on_hover_text("Font size");
-    
+        //indent decrease
+        if Self::tool_icon_button(ui, IconName::icon_indent_decrease, false, true, "Indent decrease").clicked() {
+            store.config_add_indent_size(-16.0);
+        }
+        //indent increase
+        if Self::tool_icon_button(ui, IconName::icon_indent_increase, false, true, "Indent increase").clicked() {
+            store.config_add_indent_size(16.0);
+        }   
 
         if !store.config.fixed_files.is_empty() {
             ui.separator();
@@ -166,7 +173,7 @@ impl ToolBar<'_> {
         let mut need_open = None;
         for file in &store.config.fixed_files {
             let seleted = Some(file.to_string()) == store.note_space.get_current_note();
-            let button = Button::new(file).selected(seleted).rounding(3.0);
+            let button = Button::new(file).selected(seleted).corner_radius(3.0);
             let r = button.ui(ui);
             if r.clicked() {
                 need_open = Some(file.clone());
@@ -184,7 +191,7 @@ impl ToolBar<'_> {
         for (file, _) in &store.ectx_map {
             if file.is_file() {
                 let seleted = Some(file.path()) == store.note_space.get_current_path();
-                let button = Button::new(&file.name()).selected(seleted).rounding(3.0);
+                let button = Button::new(&file.name()).selected(seleted).corner_radius(3.0);
                 let r = button.ui(ui);
                 if r.clicked() {
                     need_open = Some(file.path());
@@ -198,7 +205,7 @@ impl ToolBar<'_> {
             let _ = store.open(&path);
         }
         if let Some(path) = need_close {
-            let _ = store.close(&CurFile::from(&path));
+            let _ = store.close(&UniFile::from(&path));
         }
     }
 
@@ -248,7 +255,7 @@ impl ToolBar<'_> {
         let weak_bg_fill = ui.visuals().widgets.inactive.weak_bg_fill;
         ui.visuals_mut().widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
 
-        let names:Vec<&str> = path.split('/').collect();
+        let names:Vec<&str> = path.split(|c| c == '/' || c == '\\').collect();
         for (i, name) in names.iter().enumerate() {
             //root
             if name == &"." {} 
@@ -304,16 +311,31 @@ impl Widget for ToolBar<'_> {
         match self.tool_bar_type {
             ToolBarType::ToolBar => {
                 ui.horizontal(|ui|{
-                    //view mode button
-                    let cfg_visuals = if self.store.config.dark_mode {Visuals::dark()} else {Visuals::light()};
-                    if cfg_visuals.dark_mode != ui.style().visuals.dark_mode {
-                        ui.ctx().set_visuals(cfg_visuals.clone());
+                    //theme mode
+                    if self.store.config.dark_mode != ui.style().visuals.dark_mode {
+                        let theme = if self.store.config.dark_mode { eframe::egui::Theme::Dark } else { eframe::egui::Theme::Light };
+                        ui.ctx().set_theme(theme);
                     }
-                    if let Some(new_visuals) = cfg_visuals.light_dark_small_toggle_button(ui) {
-                        self.store.config_update_dark_mode(new_visuals.dark_mode);
-                        ui.ctx().set_visuals(new_visuals);
+                    if self.store.config.dark_mode {
+                        if ui
+                            .add(Button::new("☀").frame(false))
+                            .on_hover_text("Switch to light mode")
+                            .clicked()
+                        {
+                            ui.ctx().set_theme(eframe::egui::Theme::Dark);
+                            self.store.config_update_dark_mode(false);
+                        }
+                    } else {
+                        if ui
+                            .add(Button::new("🌙").frame(false))
+                            .on_hover_text("Switch to dark mode")
+                            .clicked()
+                        {
+                            ui.ctx().set_theme(eframe::egui::Theme::Light);
+                            self.store.config_update_dark_mode(true);
+                        }
                     }
-        
+                    
                     //tool bar
                     Self::tool_bar(self.store, ui);
                 });

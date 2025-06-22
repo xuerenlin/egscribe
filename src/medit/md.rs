@@ -1,9 +1,9 @@
 use core::f32;
 use std::ops::Range;
 
-use crate::medit::{icon, ImageInfo, PghView, TableInfo, TEXT_TOP_SPACE, TEXT_BOTTOM_SPACE};
+use crate::medit::{icon, ImageInfo, PghView, TableInfo, TEXT_TOP_SPACE, TEXT_BOTTOM_SPACE, REPL_SPACE_LINE};
 use eframe::egui::epaint::text::{LayoutJob, TextFormat};
-use eframe::egui::{Color32, FontFamily, Stroke};
+use eframe::egui::{FontFamily, Stroke};
 use markdown;
 use markdown::mdast::Node;
 use markdown::unist::Position;
@@ -11,10 +11,18 @@ use regex::Regex;
 
 use super::ctx::EditCfg;
 
+#[derive(Clone, Debug)]
+pub struct UrlInfo {
+    pub url: String,
+    pub title: Option<String>,
+    pub text: String,
+    pub pos: (usize, usize),
+}
+
 #[derive(Clone)]
 pub enum LinkInfo {
     File(String),   //file
-    Link(String),   //url
+    Url(UrlInfo),   //url
     Image(ImageInfo)
 }
 
@@ -28,8 +36,8 @@ impl LinkEnd {
     pub fn new_file(end_pos: usize, file: String) -> Self {
         LinkEnd { end_pos, link_info: LinkInfo::File(file) }
     }
-    pub fn new_link(end_pos: usize, url: String) -> Self {
-        LinkEnd { end_pos, link_info: LinkInfo::Link(url) }
+    pub fn new_url(end_pos: usize, url_info: UrlInfo) -> Self {
+        LinkEnd { end_pos, link_info: LinkInfo::Url(url_info) }
     }
     pub fn new_image(end_pos: usize, alt: String, url: String) -> Self {
         LinkEnd { end_pos, link_info: LinkInfo::Image(ImageInfo{alt, url, img:None}) }
@@ -87,10 +95,10 @@ impl<'a> MarkDownImpl<'a> {
     fn format_hide(&self, left: &Range<usize>, right: &Range<usize>) -> TextFormat {
         let mut format = TextFormat::default();
         format.font_id.size = 0.1;
-        if let Some(char_index) = self.curosr_char_index {
-            if self.seleting {
-                format.font_id.size = self.cfg.font_size;
-            } else {
+        if self.seleting {
+            format.font_id.size = self.cfg.font_size;
+        } else {
+            if let Some(char_index) = self.curosr_char_index {
                 let byte_index: usize = self
                     .text
                     .chars()
@@ -106,6 +114,7 @@ impl<'a> MarkDownImpl<'a> {
                 }
             }
         }
+
         format
     }
 
@@ -288,7 +297,7 @@ impl<'a> MarkDownImpl<'a> {
             match node {
                 Node::Link(link) => {
                     self.format_link(&mut new_format);
-                    link_url = Some(link.url.clone());
+                    link_url = Some(link);
                 }
                 Node::Strong(_) => {
                     self.format_strong(&mut new_format);
@@ -327,11 +336,13 @@ impl<'a> MarkDownImpl<'a> {
         //last child, add right ctrl
         if let Some(pos) = node.position() {
             if let Some(parent_pos) = parent_pos {
-                if last {
+                if last && pos.end.offset < parent_pos.end.offset{
                     let range_left = parent_pos.start.offset..pos.start.offset;
                     let range_right = pos.end.offset..parent_pos.end.offset;
                     let ctrl_right = &self.text[range_right.clone()];
-                    if !ctrl_right.is_empty() {
+                    if ctrl_right.trim_end().is_empty() { //all space, do not hide it 
+                        job.append(ctrl_right, 0.0, format.clone());
+                    } else {
                         job.append(ctrl_right, 0.0, self.format_hide(&range_left, &range_right));
                     }
                 }
@@ -339,7 +350,15 @@ impl<'a> MarkDownImpl<'a> {
         }
 
         if let Some(link_url) = link_url {
-            link_ends.push(LinkEnd::new_link(job.sections.len(),  link_url));
+            if let Some(pos) = &link_url.position {
+                let url_info = UrlInfo {
+                    url: link_url.url.to_owned(),
+                    title: link_url.title.to_owned(),
+                    text: self.text[pos.start.offset..pos.end.offset].to_string(),
+                    pos: (pos.start.offset, pos.end.offset),
+                };
+                link_ends.push(LinkEnd::new_url(job.sections.len(),  url_info));
+            }
         }
     }
 
@@ -360,21 +379,21 @@ impl<'a> MarkDownImpl<'a> {
 
                 if let Some(link) = link_ends.iter().find(|end| end.end_pos == i+1) {
                     pghview.push_text(seg_str, Some(sub_job));
-
+                    
                     //push link pgh_segment
                     pghview.push_icon(icon::IconName::icon_external_link(link.link_info.clone()));
-                    sub_job = LayoutJob::default();
-                    seg_str = String::new();
 
                     //push image pgh_segment
                     if let LinkInfo::Image(image_info) = &link.link_info {
                         pghview.push_image(image_info.to_owned());
                     }
 
-                    //the last segment, push a empty text segment after the icon-button
                     if i+1 == job.sections.len() {
                         pghview.push_text("".to_string(), None);
                     }
+
+                    sub_job = LayoutJob::default();
+                    seg_str = String::new();
                 }
             }
             if seg_str.len() > 0 {
@@ -383,12 +402,16 @@ impl<'a> MarkDownImpl<'a> {
         }
     }
 
+    fn paragraph_text_space(&self, pghview: &mut PghView){
+        pghview.spacing_top = self.cfg.font_size / 5.0;
+        pghview.spacing_bottom = self.cfg.font_size / 5.0;
+    }
+
     fn paragraph_to_pghview(&self, node: &Node, format: TextFormat) -> PghView {
         let mut pghview = PghView::new_text();
         pghview.push_indent();
         self.paragraph_push_to_pghview(node, format, &mut pghview);
-        pghview.spacing_top = self.cfg.font_size / 5.0;
-        pghview.spacing_bottom = self.cfg.font_size / 5.0;
+        self.paragraph_text_space(&mut pghview);
         pghview
     }
 
@@ -434,7 +457,6 @@ impl<'a> MarkDownImpl<'a> {
             if let Some(list_node) = items.first() {
                 pghview.push_quote_indent();
 
-                //println!("blockquote={:?}", node);
                 self.paragraph_push_to_pghview(node, self.format_default(), &mut pghview);
             } else {
                 let s = self.node_text(node);
@@ -478,16 +500,13 @@ impl<'a> MarkDownImpl<'a> {
             }
         }
 
-        //println!("table_info = {:?}, data={:?}", table_info, data);
         let mut pghview = PghView::new_table();
         for r in 0..table_info.row_count {
             for c in 0..table_info.col_count {
                 if let Some(row) = data.get(r) {
                     if let Some(cell) = row.get(c) {
-                        //println!("cell: {}", cell);
                         pghview.push_text(cell.to_string(), None);
                     } else {
-                        //println!("cell: {}", "");
                         pghview.push_text("".to_string(), None);
                     }
                 }
@@ -501,9 +520,9 @@ impl<'a> MarkDownImpl<'a> {
         let mut pghview = PghView::new_code();
         if let Node::Code(code) = node {
             pghview.code_lang = code.lang.clone();
-            println!("code lang:{:?}", pghview.code_lang);
+            log::debug!("code lang:{:?}", pghview.code_lang);
             for line in code.value.split('\n') {
-                println!("code_line=[{}]", line);
+                log::debug!("code_line=[{}]", line);
                 let text = line.to_string();
                 pghview.push_text(text, None);
             }
@@ -547,6 +566,7 @@ impl<'a> MarkDownImpl<'a> {
                         let mut pghview = PghView::new_text();
                         pghview.push_indent();
                         pghview.push_text(self.text.clone(), None);
+                        self.paragraph_text_space(&mut pghview);
                         return pghview;
                     }
                 }
@@ -560,37 +580,41 @@ impl<'a> MarkDownImpl<'a> {
         PghView::new_text()
     }
 
-    fn push_text(&self, node: &Node, pghvews: &mut Vec<PghView>) {
+    fn push_text(&self, node: &Node, pghviews: &mut Vec<PghView>) {
         let mut pghview = PghView::new_text();
         if let Some(pos) = node.position() {
             let s = &self.text[pos.start.offset..pos.end.offset];
             let mut line = s.to_string();
-            line.retain(|c| c != '\n'); //删除同一个段落中的换行符号
+
+            //delete \n in one paragraph
+            line.retain(|c| c != '\n'); 
+
+            //replace REPL_SPACE_LINE
+            let line = line.replace(REPL_SPACE_LINE, "");
+
             pghview.push_text(line, None);
-            pghvews.push(pghview);
+            pghviews.push(pghview);
         }
     }
 
-    fn push_table(&self, node: &Node, pghvews: &mut Vec<PghView>) {
+    fn push_table(&self, node: &Node, pghviews: &mut Vec<PghView>) {
         let pgh_view = self.table_to_pghview(node);
-        pghvews.push(pgh_view);
+        pghviews.push(pgh_view);
     }
 
-    fn push_code(&self, node: &Node, pghvews: &mut Vec<PghView>) {
+    fn push_code(&self, node: &Node, pghviews: &mut Vec<PghView>) {
         let pgh_view = self.code_to_pghview(node);
-        pghvews.push(pgh_view);
+        pghviews.push(pgh_view);
     }
 
-    fn node_to_pgh_text(&self, node: &Node, pghvews: &mut Vec<PghView>) {
+    fn node_to_pgh_text(&self, node: &Node, pghviews: &mut Vec<PghView>) {
         match node {
             Node::Paragraph(p) => {
-                //println!("{:?}", node);
-                self.push_text(node, pghvews);
+                self.push_text(node, pghviews);
             }
             Node::List(list) => {
                 for item in &list.children {
-                    //println!("{:?}", item);
-                    self.push_text(item, pghvews);
+                    self.push_text(item, pghviews);
                 }
             }
             Node::Blockquote(block) => {
@@ -604,36 +628,34 @@ impl<'a> MarkDownImpl<'a> {
                         };
                         let mut pghview = PghView::new_block_line();
                         pghview.push_text(quote_s, None);
-                        pghvews.push(pghview);
+                        pghviews.push(pghview);
                     }
                 } else {
                     let mut pghview = PghView::new_block_line();
                     pghview.push_text(">".to_string(), None);
-                    pghvews.push(pghview);
+                    pghviews.push(pghview);
                 }
             }
             Node::Table(_) => {
                 //println!("{:?}", node);
-                self.push_table(node, pghvews);
+                self.push_table(node, pghviews);
             }
             Node::Code(_) => {
-                self.push_code(node, pghvews);
+                self.push_code(node, pghviews);
             }
             _ => {
-                //println!("{:?}", node);
-                self.push_text(node, pghvews);
+                self.push_text(node, pghviews);
             }
         }
     }
 
     pub fn markdown_to_pgh_texts(&self) -> Vec<PghView> {
-        let mut pghvews = vec![];
+        let mut pghviews = vec![];
         if self.enable_markdown {
-            //println!("{}");
             if let Ok(ast) = markdown::to_mdast(&self.text, &markdown::ParseOptions::gfm()) {
                 if let Some(items) = ast.children() {
                     for item in items {
-                        self.node_to_pgh_text(item, &mut pghvews);
+                        self.node_to_pgh_text(item, &mut pghviews);
                     }
                 }
             }
@@ -644,18 +666,18 @@ impl<'a> MarkDownImpl<'a> {
                 pgh_view.push_text(sline, None);
                 pgh_view.spacing_top = TEXT_TOP_SPACE;
                 pgh_view.spacing_bottom = TEXT_BOTTOM_SPACE;
-                pghvews.push(pgh_view);
+                pghviews.push(pgh_view);
             }
         }
 
         //empty content, insert one empty line
-        if pghvews.is_empty() {
+        if pghviews.is_empty() {
             let mut pgh_view = PghView::new_text();
             pgh_view.push_text("".to_string(), None);
-            pghvews.push(pgh_view);
+            pghviews.push(pgh_view);
         }
 
-        pghvews
+        pghviews
     }
 
     fn get_node_links(&self, node: &Node, links: &mut Vec<String>) {
@@ -741,9 +763,7 @@ pub fn echo_ast(md: &str, ast: &Node) {
 
 #[test]
 pub fn test_md() {
-    let md = r#"
-![image](file://test1.png)
-"#;
+    let md = r#"[[test]] "#;
 
     let ast = markdown::to_mdast(md, &markdown::ParseOptions::gfm()).unwrap();
 

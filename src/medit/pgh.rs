@@ -3,7 +3,7 @@ use core::f32;
 use dyn_clone::DynClone;
 use eframe::egui::epaint::text::{LayoutJob, TextFormat};
 use eframe::egui::{
-    vec2, FontFamily, FontId, Grid, NumExt, Pos2, Rect, Response, Stroke, Ui, Vec2
+    vec2, FontFamily, FontId, Grid, NumExt, Pos2, Rect, Response, Stroke, StrokeKind, Ui, Vec2, Color32
 };
 
 use crate::sitter::{LightSlice, highlight_lines, support_lang};
@@ -86,7 +86,7 @@ pub trait PghItem: DynClone {
     fn update_text(&mut self, text: String) {}
 
     fn max_culumn(&self) -> usize {
-        1
+        0
     }
 
     fn icon_name(&self) -> Option<icon::IconName> {
@@ -319,6 +319,53 @@ impl PghView {
         false
     }
 
+    pub fn is_pos_left(&self, pos: &Pos2) -> bool {
+        if let Some(rect) = self.rect {
+            if pos.x < rect.left()
+                && pos.y >= rect.left_top().y
+                && pos.y <= rect.right_bottom().y
+            {
+                return true;
+            }
+        }
+        false
+    }
+
+    pub fn is_pos_right(&self, pos: &Pos2) -> bool {
+        if let Some(rect) = self.rect {
+            if pos.x >= rect.right()
+                && pos.y >= rect.left_top().y
+                && pos.y <= rect.right_bottom().y
+            {
+                return true;
+            }
+        }
+        false
+    }
+
+    pub fn first_same_y_segment(&self, pos: &Pos2) -> usize {
+        for (i, segment) in self.pgh.iter().enumerate() {
+            if let Some(rect) = segment.rect {
+                if rect.left_top().y <= pos.y && rect.right_bottom().y >= pos.y {
+                    return i
+                }
+            }
+        }
+        0
+    }
+
+    pub fn last_same_y_segment(&self, pos: &Pos2) -> usize {
+        let mut last = self.max_segment();
+        for (i, segment) in self.pgh.iter().enumerate() {
+            if let Some(rect) = segment.rect {
+                if rect.left_top().y <= pos.y && rect.right_bottom().y >= pos.y {
+                    last = i
+                }
+            }
+        }
+        last
+    }
+
     pub fn rect(&self) -> Option<Rect> {
         self.rect
     }
@@ -333,32 +380,8 @@ impl PghView {
             if None != self.rect {
                 let mut new_rect = rect;
                 for sub_segment in &self.pgh {
-                    if let Some(org) = sub_segment.rect {
-                        let min_x = if org.min.x < new_rect.min.x {
-                            org.min.x
-                        } else {
-                            new_rect.min.x
-                        };
-                        let min_y = if org.min.y < new_rect.min.y {
-                            org.min.y
-                        } else {
-                            new_rect.min.y
-                        };
-                        let max_x = if org.max.x > new_rect.max.x {
-                            org.max.x
-                        } else {
-                            new_rect.max.x
-                        };
-                        let max_y = if org.max.y > new_rect.max.y {
-                            org.max.y
-                        } else {
-                            new_rect.max.y
-                        };
-
-                        new_rect = Rect::from_min_max(
-                            Pos2 { x: min_x, y: min_y },
-                            Pos2 { x: max_x, y: max_y },
-                        );
+                    if let Some(seg_rect) = sub_segment.rect {
+                        new_rect = new_rect.union(seg_rect)
                     }
                 }
                 self.rect = Some(new_rect);
@@ -678,7 +701,7 @@ impl PghView {
             let seg_index = std::cmp::min(cursor.culumn, seg_max);
             index += seg_index;
         } else {
-            println!(
+            log::debug!(
                 "cursor_to_text_index fail {:?}, text={}, pgh_len={}",
                 cursor,
                 self.get_text(),
@@ -755,11 +778,19 @@ impl PghView {
         true
     }
 
-    pub fn get_text_warp_width(ui: &Ui, ctx: &Ctx, keep_space: f32) -> f32 {
+    pub fn get_text_warp_width_base_cursor(ui: &Ui, ctx: &Ctx, keep_space: f32) -> f32 {
         let pos = ui.cursor().left_top();
         let edit_right = ctx.edit_rect().right();
         if (ctx.cfg().wrap && pos.x <= edit_right) || keep_space > 1.0 {
             edit_right - pos.x - keep_space
+        } else {
+            f32::INFINITY
+        }
+    }
+
+    pub fn get_text_warp_width_base_rect(ctx: &Ctx, rect_width: f32) -> f32 {
+        if ctx.cfg().wrap {
+            rect_width
         } else {
             f32::INFINITY
         }
@@ -779,23 +810,25 @@ impl PghView {
             .unwrap_or_else(|| FontId::default());
         let mut curoser_char_index = None;
 
+        //log::debug!("{:#?}", pgh_view);
+
         //get index of text
         let cursor = ctx.cursor2();
         if cursor.line_no == line_no {
             let text_index = pgh_view.cursor_to_text_char_index(&cursor);
             curoser_char_index = Some(text_index);
-            //println!("cursor_to_text_index {:?} -> {}", cursor, text_index);
         }
 
         //parser markdown when this pgh has changed or is the cursor line
         let new_pghview;
         let mut mk_pghview = pgh_view;
-        if ctx.cfg().is_markdown && (cursor.line_no == line_no || ctx.line_change_reset(line_no))  {    //todo
+        let is_line_changed = ctx.line_change_reset(line_no);
+        if ctx.cfg().is_markdown && (cursor.line_no == line_no || is_line_changed || ctx.is_selected_line(line_no))  {
             let markdown = MarkDownImpl::new(
                 &text,
                 ctx.cfg().is_markdown,
                 curoser_char_index,
-                ctx.is_selected(),
+                ctx.is_selected_line(line_no),
                 ctx.cfg()
             );
     
@@ -806,7 +839,6 @@ impl PghView {
             //}
 
             mk_pghview = &new_pghview;
-            //println!("parser markdown again, line {}", line_no+1);
         }
 
         ctx.update_spacing(line_no, mk_pghview.spacing_top, mk_pghview.spacing_bottom);
@@ -822,23 +854,26 @@ impl PghView {
         }
 
         let mut images = vec![];
-        ui.horizontal(|ui| {
-            //garagraph
+        ui.horizontal_wrapped(|ui| {
+            let mut row_rect = ui.cursor();
+            row_rect.set_right(ctx.edit_right());
+
             for (segment, pgh_segment) in mk_pghview.pgh.iter().enumerate() {
-                let need_expand = segment == mk_pghview.max_segment();
-                //let need_expand = mk_pghview.is_last_text_segment(segment);
                 match pgh_segment.seg_type {
                     SegmentType::Text => {
-                        let warp_width = Self::get_text_warp_width(ui, ctx, 0.0);
+                        let need_expand = segment == mk_pghview.max_segment();
+                        let warp_width = Self::get_text_warp_width_base_rect(ctx,  row_rect.width());
                         response |= PghText::layout_paragraph(
                             ui,
                             ctx,
                             line_no,
                             segment,
+                            row_rect,
                             warp_width,
                             mk_pghview.spacing_top,
                             mk_pghview.spacing_bottom,
                             need_expand,
+                            false,
                             pgh_segment.item.text(),
                             &pgh_segment.item.layout_job(),
                         );
@@ -847,7 +882,7 @@ impl PghView {
                         PghHead::layout_paragraph(ui, ctx, line_no, segment, &pgh_segment.item);
                     }
                     SegmentType::Indent => {
-                        response |= PghIndent::layout_paragraph(ui, ctx, line_no, segment);
+                        response |= PghIndent::layout_paragraph(ui, ctx, line_no, segment, ctx.cfg().indent_size);
                     }
                     SegmentType::CheckBox => {
                         PghCheckBox::layout_paragraph(ui, ctx, line_no, segment, &pgh_segment.item);
@@ -865,15 +900,13 @@ impl PghView {
                         );
                     }
                     SegmentType::Break => {
-                        //println!("break------------------");
                         PghBreak::layout_paragraph(ui, ctx, line_no, segment, &pgh_segment.item);
                     }
                     SegmentType::Icon => {
-                        //println!("break------------------");
-                        let r = PghIcon::layout_paragraph(ui, ctx, line_no, segment, &pgh_segment.item);
-                        if r.clicked() {
+                        let (r, is_clicked) = PghIcon::layout_paragraph(ui, ctx, line_no, segment, &pgh_segment.item);
+                        if is_clicked || is_line_changed {
                             if let Some(IconName::icon_external_link(link_info)) = pgh_segment.item.icon_name() {
-                                ctx.insert_link_click_command(link_info);
+                                ctx.insert_link_click_command(line_no, link_info, is_clicked, is_line_changed);
                             }
                         }
                     }
@@ -882,12 +915,22 @@ impl PghView {
                     }
                 }
             }
+
+            //right space
+            let mut right_rect = ui.cursor();
+            if right_rect.left() < ctx.edit_right() {
+                right_rect.set_right(ctx.edit_right());
+                right_rect.set_height(response.rect.height() - mk_pghview.spacing_top);  
+                //log::debug!("add right rect: {:?}", right_rect);
+                //ui.painter().rect_stroke(right_rect, 0.0, Stroke::new(0.5, Color32::RED), StrokeKind::Outside);
+                response |= ui.allocate_rect(right_rect, ctx.sense());
+            }
         });
 
         //draw images
         for (segment, image) in images {
             ui.horizontal(|ui| {
-                PghIndent::layout_paragraph(ui, ctx, line_no, segment);
+                PghIndent::layout_paragraph(ui, ctx, line_no, segment, ctx.cfg().indent_size);
                 PghImage::layout_paragraph(ui, ctx, line_no, segment, &image.item);
             });
         }
@@ -903,7 +946,7 @@ impl PghView {
             if !ctx.is_selected() {
                 let cursor = mk_pghview.text_char_index_to_cursor(text_index, cursor.line_no);
                 if cursor != ctx.cursor2() {
-                    println!(
+                    log::debug!(
                         "old cursor:{:?}, new cursor:{:?} <- {}",
                         ctx.cursor2(),
                         cursor,
@@ -911,7 +954,6 @@ impl PghView {
                     );
                     ctx.set_cursor2(cursor);
                     ctx.set_cursor1_reset();
-                    println!("update cusor2={:?}", ctx.cursor2());
                 }
             }
         }
@@ -1005,7 +1047,6 @@ impl PghView {
                     }
                 }
             }
-            //println!("code_highlight_job updated, line:{}", line_no+1);
         }
     }
 
@@ -1042,31 +1083,42 @@ impl PghView {
 
         //layout
         for (segment, pgh_segment) in pgh_view.pgh.iter().enumerate() {
+            if segment == 0 {
+                ui.horizontal(|ui|{
+                    response |= PghIndent::layout_paragraph(ui, ctx, line_no, segment, ctx.cfg().indent_size);
+                    Self::font_size_menus(ctx, ui, pgh_view, line_no);
+                });
+            }
             ui.horizontal(|ui|{
-                response |= PghIndent::layout_paragraph(ui, ctx, line_no, segment);
+                response |= PghIndent::layout_paragraph(ui, ctx, line_no, segment, ctx.cfg().indent_size);
                 let need_expand = true;
-                let keep_space = if segment == 0 {80.0} else {0.0};
+                //let keep_space = if segment == 0 {80.0} else {0.0};
+                let keep_space = 0.0;
                 match pgh_segment.seg_type {
                     SegmentType::Text => {
-                        let warp_width = Self::get_text_warp_width(ui, ctx, keep_space);
+                        let mut item_rect = ui.cursor();
+                        item_rect.set_right(ctx.edit_right());
+                        let warp_width = Self::get_text_warp_width_base_cursor(ui, ctx, keep_space);
                         response |= PghText::layout_paragraph(
                             ui,
                             ctx,
                             line_no,
                             segment,
+                            item_rect,
                             warp_width,
                             pgh_view.spacing_top,
                             pgh_view.spacing_bottom,
                             need_expand,
+                            false,
                             pgh_segment.item.text(),
                             &pgh_segment.item.layout_job(), 
                         );
                     }
                     _ => {}
                 }
-                if segment == 0 {
-                    Self::font_size_menus(ctx, ui, pgh_view, line_no);
-                }
+                //if segment == 0 {
+                //    Self::font_size_menus(ctx, ui, pgh_view, line_no);
+                //}
             });
         }
 
@@ -1078,7 +1130,7 @@ impl PghView {
 
         //frame
         let mut rect = response.rect;
-        rect.min.x += 12.0;
+        rect.min.x += ctx.cfg().indent_size;
         let painter = ui.painter();
         //let stroke = Stroke::new(1.0, ui.visuals().weak_text_color());
         //painter.rect_stroke(rect, 3.0, stroke);
@@ -1141,7 +1193,6 @@ impl PghView {
         if let Some((c1, c2)) = self.table_range_to_cells(s1, s2) {
             if let Some(rect1) = self.get_segment_rect(c1.segment) {
                 if let Some(rect2) = self.get_segment_rect(c2.segment) {
-                    //println!("2 {}-{} c1:{:?} c2:{:?}", s1, s2, &c1, &c2);
                     return Some(Rect::from_two_pos(rect1.left_top(), rect2.right_bottom()));
                 }
             }
@@ -1202,7 +1253,6 @@ impl PghView {
         let mut empty_col = vec![];
         if let Some(table_info) = &self.table_info {
             if let Some((min, max)) = self.table_range_to_cells(s1, s2) {
-                println!("min:{:?} max:{:?}", min, max);
                 if min.col == 0 && max.col + 1 == table_info.col_count {
                     for row in min.row..=max.row {
                         if self.table_is_empty_row(row) {
@@ -1320,12 +1370,13 @@ impl PghView {
     }
 
     pub fn table_guess_text_width(ui: &Ui, ctx: &Ctx, row: usize, text: String) -> f32 {
+        let min_width = 8.0;
         let job = if row == 0 {
             Self::table_head_job(ui, ctx, &text)
         } else {
             Self::table_cell_job(ui, ctx, &text)
         };
-        ui.fonts(|f| f.layout_job(job)).rect.width()
+        ui.fonts(|f| f.layout_job(job)).rect.width().at_least(min_width)
     }
 
     pub fn table_guess_width(&self, ui: &Ui, ctx: &Ctx) -> Vec<f32> {
@@ -1372,8 +1423,6 @@ impl PghView {
                     .collect();
                 width_info = new_info;
             }
-            //let total:f32 = width_info.iter().sum();
-            //println!("longest col:{:?} total:{} max_width:{}", width_info, total, max_width);
         };
 
         width_info
@@ -1396,6 +1445,7 @@ impl PghView {
                         rect,
                         1.0,
                         Stroke::new(0.5, ui.visuals().weak_text_color()),
+                        StrokeKind::Outside,
                     );
                 }
             }
@@ -1508,16 +1558,19 @@ impl PghView {
         let width_info = pgh_view.table_guess_width(ui, ctx);
         let max_col_width = ctx.edit_width();
         if let Some(table_info) = &pgh_view.table_info {
-            let table_id = format!("table_id_{}", line_no);
-            let iner_rsp = Grid::new(&table_id)
-                .striped(!table_info.has_frame)
-                .min_col_width(0.0)
-                .min_row_height(0.0)
-                .max_col_width(max_col_width)
-                .spacing(Vec2 {
-                    x: table_info.spacing_x,
-                    y: table_info.spacing_y,
-                })
+            ui.horizontal(|ui|{
+                PghIndent::layout_paragraph(ui, ctx, line_no, 0, ctx.cfg().indent_size);
+                let table_id = format!("table_id_{}", line_no);
+                let iner_rsp = Grid::new(&table_id)
+                    .striped(!table_info.has_frame)
+                    .num_columns(table_info.col_count)
+                    .min_col_width(0.0)
+                    .min_row_height(0.0)
+                    .max_col_width(max_col_width)
+                    .spacing(Vec2 {
+                        x: table_info.spacing_x,
+                        y: table_info.spacing_y,
+                    })
                 .show(ui, |ui| {
                     let mut all_cell_rects = vec![];
                     for r in 0..table_info.row_count {
@@ -1531,22 +1584,23 @@ impl PghView {
                                 } else {
                                     Self::table_cell_job(ui, ctx, &text)
                                 };
-                                let warp_width =
-                                    width_info.get(c).unwrap_or_else(|| &max_col_width);
-                                let begin_pos = ui.cursor().left_top().x;
+                                let warp_width = *width_info.get(c).unwrap_or_else(|| &max_col_width);
+                                let mut item_rect = ui.cursor();
+                                item_rect.set_width(warp_width);
                                 let rsp = PghText::layout_paragraph(
                                     ui,
                                     ctx,
                                     line_no,
                                     cell_i,
-                                    *warp_width,
+                                    item_rect,
+                                    warp_width,
                                     table_info.spacing_y / 2.0,
                                     table_info.spacing_y / 2.0,
+                                    true,
                                     true,
                                     text,
                                     &Some(job),
                                 );
-
                                 row_cell_rects.push(rsp.rect);
                                 response |= rsp;
                             }
@@ -1573,7 +1627,7 @@ impl PghView {
                         Self::table_draw_buttons(ui, ctx, &cursor, &table_info, &all_cell_rects);
                     }
                 });
-            response |= iner_rsp.response;
+            });
         };
 
         response
@@ -1599,7 +1653,21 @@ impl PghView {
 
             ui.horizontal(|ui| {
                 ui.allocate_exact_size(vec2(table_info.spacing_indent, 0.0), ctx.sense());
-                response |= Self::layout_table(ui, ctx, line_no, pgh_view);
+                let rsp = Self::layout_table(ui, ctx, line_no, pgh_view);
+                
+                //table rect inclue frame and icon_space_x
+                let table_rect = rsp.rect.expand2(Vec2 { x: table_info.spacing_x/2.0, y: table_info.spacing_y/2.0});    //include frame
+                let table_rect = table_rect.expand2(Vec2 { x: size.x, y: 0.0 });  //include icon_space_x
+                //ui.painter().rect_stroke(table_rect, 0.0, Stroke::new(0.5, Color32::RED), StrokeKind::Outside);
+                response |= rsp;
+
+                //add right space
+                if table_rect.right() < ctx.edit_right() {
+                    let mut right_rect = table_rect; 
+                    right_rect.set_left(table_rect.right());
+                    right_rect.set_right(ctx.edit_right());
+                    response |= ui.allocate_rect(right_rect, ctx.sense());
+                }
             });
 
             //bottom space

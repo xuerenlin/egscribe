@@ -21,6 +21,8 @@ pub enum IconName {
     icon_unfixed, //e90B
     icon_fixed, //e90C
     icon_close, //e90d
+    icon_indent_decrease,  //e90e
+    icon_indent_increase,  //e90f
 }
 
 impl IconName {
@@ -33,13 +35,15 @@ impl IconName {
             IconName::icon_sort_numerically => '\u{e904}',
             IconName::icon_external_link(_) => '\u{e905}', 
             IconName::icon_home => '\u{e906}', 
-            IconName::icon_refresh => '\u{e907}', //e907
-            IconName::icon_file_rename => '\u{e908}', //e908
-            IconName::icon_delete => '\u{e909}', //e909
-            IconName::icon_new => '\u{e90A}', //e90A
-            IconName::icon_unfixed => '\u{e90B}', //e90C
-            IconName::icon_fixed => '\u{e90C}', //e90C
-            IconName::icon_close => '\u{e90D}', //e90D
+            IconName::icon_refresh => '\u{e907}',
+            IconName::icon_file_rename => '\u{e908}', 
+            IconName::icon_delete => '\u{e909}',
+            IconName::icon_new => '\u{e90A}',
+            IconName::icon_unfixed => '\u{e90B}',
+            IconName::icon_fixed => '\u{e90C}',
+            IconName::icon_close => '\u{e90D}',
+            IconName::icon_indent_decrease => '\u{e90E}',
+            IconName::icon_indent_increase => '\u{e90F}',
         }
     }
 }

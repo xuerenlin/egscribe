@@ -1,6 +1,26 @@
 {
-  "show_line_no": false,
-  "wrap": true,
+  "show_line_no": true,
+  "show_index_window": true,
+  "wrap": false,
   "font_size": 16.0,
-  "current_file": "untitled_2"
+  "dark_mode": true,
+  "current_file": "untitled_1",
+  "fixed_files": [],
+  "opend_files": [
+    "untitled_1"
+  ],
+  "tree_open_state": {
+    "untitled_3": true,
+    "help": true,
+    "2025-02-04": true,
+    "untitled_2": true,
+    "2025-02-05": true,
+    "test": true,
+    "2025-02-06": true,
+    ".": true,
+    "daily": true,
+    "read": true,
+    "untitled_1": true
+  },
+  "tree_open_state_changed": true
 }

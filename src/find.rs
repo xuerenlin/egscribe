@@ -1,6 +1,7 @@
 
 use eframe::egui::{Button, Event, EventFilter, Key, Order, Rect, ScrollArea, TextEdit, Ui, Vec2, Widget, Window};
 use crate::medit::{ctx::FindCache, Ctx, FindCmd, FindReplaceCtx};
+use crate::space::UniFile;
 
 pub struct FindWindow {
     is_show: bool,
@@ -9,6 +10,7 @@ pub struct FindWindow {
     replace_ready: bool,
     is_open_replace: bool,
     param: FindReplaceCtx,
+    pub find_file: Option<UniFile>,
     pub edit_ctx: Ctx,
 }
 
@@ -21,9 +23,10 @@ impl FindWindow {
             is_window: true,
             need_focus: false,
             replace_ready: false,
-            edit_ctx,
             is_open_replace: false,
             param: FindReplaceCtx::new(),
+            find_file: None,
+            edit_ctx,
         }
     }
 
@@ -43,16 +46,17 @@ impl FindWindow {
         self.is_window
     }
 
-    pub fn set_find_result(&mut self, result: &FindCache, find_param: &FindReplaceCtx) {
-        let last_line_no = if let Some(last) = result.cache.last() {
-            last.start.line_no.to_string().len()
+    pub fn set_find_result(&mut self, find_file: UniFile, result: &FindCache, find_param: &FindReplaceCtx, dark_mode: bool) {
+        let cursor_text_size = if let Some(last) = result.cache.last() {
+            last.end.line_no.to_string().len() + 8
         } else {
             1
         };
         
         let text = result.cache.iter().map(|item|{
                 let line_text = item.line_text.clone().unwrap_or(String::new());
-                format!("{:>last_line_no$} {}", item.start.line_no+1, line_text)
+                let cursor_text = format!("{}.{}.{}.", item.end.line_no, item.end.segment, item.end.culumn);
+                format!("{:>cursor_text_size$} {}", cursor_text, line_text)
             })
             .collect::<Vec<_>>()
             .join("\n");
@@ -60,7 +64,9 @@ impl FindWindow {
         self.edit_ctx = Ctx::new(&text, false, None);
         self.edit_ctx.cfg_mut().need_line_click_cmd = true;
         self.edit_ctx.cfg_mut().hightlight_seleted_word = false;
+        self.edit_ctx.cfg_mut().dark_mode = dark_mode;
         self.edit_ctx.flash_same_cache_with_param(find_param);
+        self.find_file = Some(find_file);
     }
 
     pub fn show_content(&mut self, ui: &mut Ui) -> Option<FindReplaceCtx> {
@@ -68,15 +74,15 @@ impl FindWindow {
 
         ui.add_space(4.0);
         ui.horizontal(|ui|{
-            let case_button = Button::new("Aa").selected(self.param.is_case).rounding(3.0);
+            let case_button = Button::new("Aa").selected(self.param.is_case).corner_radius(3.0);
             if case_button.ui(ui).clicked() {
                 self.param.is_case = !self.param.is_case;
             }
-            let word_button = Button::new("__").selected(self.param.is_hole_word).rounding(3.0);
+            let word_button = Button::new("__").selected(self.param.is_hole_word).corner_radius(3.0);
             if word_button.ui(ui).clicked() {
                 self.param.is_hole_word = !self.param.is_hole_word;
             }
-            let regex_button = Button::new("/.*/").selected(self.param.is_reg).rounding(3.0);
+            let regex_button = Button::new("/.*/").selected(self.param.is_reg).corner_radius(3.0);
             if regex_button.ui(ui).clicked() {
                 self.param.is_reg = !self.param.is_reg;
             }
@@ -97,7 +103,7 @@ impl FindWindow {
 
             ui.separator();
             let open_text = if self.is_open_replace {"<"} else {">"};
-            let open_replace_button = Button::new(open_text).selected(self.is_open_replace).rounding(3.0);
+            let open_replace_button = Button::new(open_text).selected(self.is_open_replace).corner_radius(3.0);
             if open_replace_button.ui(ui).clicked() {
                 self.is_open_replace = !self.is_open_replace;
             }

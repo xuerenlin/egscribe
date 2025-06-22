@@ -2,13 +2,17 @@ use core::f32;
 use std::ops::Add;
 
 use crate::sitter::highlight_lines;
-use crate::medit::{ImageInfo, LinkInfo, PghType, CharRect, Cursor, MarkDownImpl, SegmentType, PghView, DoItem, DoCmd, DoMngr, Command, FindReplaceCtx};
+use crate::medit::{ImageInfo, LinkInfo, PghType, CharRect, Cursor, MarkDownImpl, SegmentType, PghView, 
+    DoItem, DoCmd, DoMngr, Command, FindReplaceCtx, REPL_SPACE_LINE};
+use crate::util::{enc_content, dec_content};
 use eframe::egui::{Color32, NumExt, Pos2, Rect, Sense, Ui};
 use eframe::egui::epaint::text::LayoutJob;
 use regex::Regex;
 use arboard::Clipboard;
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
+
+use super::UrlInfo;
 
 #[derive(Clone, PartialEq)]
 pub struct State {
@@ -23,7 +27,6 @@ pub struct State {
     cursor_show_time: u64, //milliseconds
     cursor_show_bool: bool,
     selecting: bool,
-    is_pointer_gone: bool,
 
     content_change_tick: u64,
     ime_area_changed: bool,
@@ -42,7 +45,6 @@ impl Default for State {
             cursor_show_time: 0,
             cursor_show_bool: true,
             selecting: false,
-            is_pointer_gone: false,
             content_change_tick: 0,
             ime_area_changed: false,
         }
@@ -67,13 +69,14 @@ impl Default for Area {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FindCacheItem{
     pub start: Cursor,
     pub end: Cursor,
     pub line_text: Option<String>,
 }
 
+#[derive(Clone)]
 pub struct FindCache {
     pub cache: Vec<FindCacheItem>,
 }
@@ -91,10 +94,13 @@ pub struct EditColors {
     pub code_bg_color: Color32,
     pub link_color: Color32,
     pub weak_color: Color32,
+    pub select_color: Color32,
+    pub same_text_color: Color32,
 }
 pub struct EditCfg {
     pub font_size: f32,
     pub font_heigh: f32,
+    pub indent_size: f32,
     pub dark_mode: bool,
     pub wrap: bool,
     pub show_line_no: bool,
@@ -114,6 +120,7 @@ impl EditCfg {
             font_size,
             dark_mode: true,
             font_heigh: 23.0,
+            indent_size: 16.0,
             wrap: false,
             show_line_no: false,
             is_markdown,
@@ -127,6 +134,8 @@ impl EditCfg {
                 code_bg_color: Color32::from_gray(64),
                 link_color: Color32::from_rgb(90, 170, 255),
                 weak_color: Color32::from_rgb(100,100,100),
+                select_color: Color32::from_rgb(0, 92, 128),
+                same_text_color: Color32::from_rgb(0, 46, 86),
             },
 
             light_color: EditColors {
@@ -134,6 +143,8 @@ impl EditCfg {
                 code_bg_color: Color32::from_gray(230),
                 link_color: Color32::from_rgb(0, 155, 255),
                 weak_color: Color32::from_rgb(100,100,100),
+                select_color: Color32::from_rgb(100, 209, 255),
+                same_text_color: Color32::from_rgb(160, 209, 255),
             },
         }
     }
@@ -161,6 +172,19 @@ impl EditCfg {
     pub fn weak_color(&self) -> Color32 {
         self.colors().weak_color
     }
+
+    pub fn select_color(&self) -> Color32 {
+        self.colors().select_color
+    }
+
+    pub fn same_text_color(&self) -> Color32 {
+        self.colors().same_text_color
+    }
+}
+
+pub enum HighlightRect {
+    Select(Rect),
+    SameText(Rect),
 }
 
 pub struct Ctx {
@@ -232,6 +256,19 @@ impl Ctx {
                 if let Some(cursor) = pgh_view.cursor_from_pos(top_line + i, pos) {
                     return Some(cursor);
                 }
+            } else if pgh_view.is_pos_left(pos) {
+                let segment = pgh_view.first_same_y_segment(pos);
+                return Some((top_line + i, segment, 0).into());
+            } else if pgh_view.is_pos_right(pos) {
+                let mut segment = pgh_view.last_same_y_segment(pos);
+                let mut culumn = pgh_view.max_culumn(&(top_line+1, segment, 0).into());
+                //the last segment is not normal text (it has not culumns)
+                log::debug!("segment={} culumn={}", segment, culumn);
+                if segment > 0 && culumn == 0 {
+                    segment -= 1;
+                    culumn = pgh_view.max_culumn(&(top_line+1, segment, 0).into());
+                }
+                return Some((top_line + i, segment, culumn).into());
             }
         }
         None
@@ -312,6 +349,18 @@ impl Ctx {
         None
     }
 
+    fn get_code_cursor_left(&self, min: &Cursor, max: &Cursor) -> Option<f32> {
+        if min.line_no != max.line_no {
+            return None;
+        }
+        if let Some(pgh_view) = self.pgh_views.get(min.line_no) {
+            if pgh_view.is_code() {
+                return Some(self.left_top().x + self.line_no_width() + self.cfg.indent_size);
+            }
+        }
+        None
+    }
+
     pub fn get_cursor2_line_rect(&self) -> Option<Rect> {
         let cursor = self.cursor2();
         if let Some(pghview) = self.pgh_views.get(cursor.line_no) {
@@ -324,23 +373,30 @@ impl Ctx {
         }
     }
 
-    pub fn get_cursor_rects(&self) -> Option<Vec<Rect>> {
+    pub fn get_heighlight_rects(&self) -> Option<Vec<HighlightRect>> {
         let mut rects = vec![];
         if self.is_selected() {
-            if let Some(mut rc) = self.get_crange_rects(self.state.cursor1, self.state.cursor2) {
-                rects.append(&mut rc);
+            if let Some(vec_rc) = self.get_crange_rects(self.state.cursor1, self.state.cursor2) {
+                for rc in vec_rc {
+                    rects.push(HighlightRect::Select(rc));
+                }
             }
         }
 
-        for rc in &self.same_cache.cache {  
-            if rc.start == self.state.cursor1 || rc.start == self.state.cursor2 {
-                continue;
-            }
-            if let Some(mut rc) = self.get_crange_rects(rc.start, rc.end) {
-                rects.append(&mut rc);
+        if !self.same_cache.cache.is_empty() {
+            let min = std::cmp::min(self.state.cursor1, self.state.cursor2);
+            let max = std::cmp::max(self.state.cursor1, self.state.cursor2);
+            for rc in &self.same_cache.cache {  
+                if rc.start == min || rc.end == max {
+                    continue;
+                }
+                if let Some(vec_rc) = self.get_crange_rects(rc.start, rc.end) {
+                    for rc in vec_rc {
+                        rects.push(HighlightRect::SameText(rc));
+                    }
+                }
             }
         }
-
         Some(rects)
     }
 
@@ -377,10 +433,15 @@ impl Ctx {
                     left = table_rect.left();
                     width = table_rect.width().at_most(self.edit_width());
                 }
+                if let Some(code_left) = self.get_code_cursor_left(&min, &max){
+                    left = code_left;
+                }
 
-                if (min_rect.min.y - max_rect.min.y).abs() < 0.1 {
+                if (min_rect.min.y - max_rect.min.y).abs() < self.font_heigh()/2.0 {
                     //the same line
-                    rects.push(Rect::from_min_max(min_rect.min, max_rect.max));
+                    let min = Pos2::new(min_rect.min.x, min_rect.min.y.min(max_rect.min.y));
+                    let max = Pos2::new(max_rect.max.x, min_rect.max.y.max(max_rect.max.y));
+                    rects.push(Rect::from_min_max(min, max));
                 } else {
                     //first line
                     rects.push(Rect::from_min_max(
@@ -417,7 +478,7 @@ impl Ctx {
 
     fn get_word_at_cursor(text: &str, cursor: usize) -> Option<(usize, usize)> {
         let chars: Vec<char> = text.chars().collect();
-        let delimiters = " \t~`!@#$%^&*()+-=[]\\{}|;':\",./<>?，。、；：‘’“”";
+        let delimiters = " \t~`!@#$%^&()+-=[]\\{}|;':\",./<>?，。、；：‘’“”";
 
         if cursor >= chars.len() {
             return None;
@@ -641,22 +702,31 @@ impl Ctx {
         for (line_no, pgh_view) in self.pgh_views.iter().enumerate() {
             let cursor1: Cursor = 0.into();
             let cursor2: Cursor = usize::MAX.into();
-            let mut selected = pgh_view.select(line_no, &cursor1, &cursor2, false);
-            if pgh_view.is_code() {
-                let lang = pgh_view.code_lang.clone().unwrap_or_else(||"".to_string());
-                selected = format!("```{}\n{}\n```\n", lang, selected);
-            }
-            if line_no > 0 {
-                //insert "\n\n" between text line for markdown
-                if self.cfg.is_markdown && (pre_pgh_type != pgh_view.pgh_type || pre_pgh_type == PghType::Text && pgh_view.pgh_type ==  PghType::Text) {
-                    s += "\n\n"
-                } else {
+            if self.cfg().is_markdown {
+                let mut selected = pgh_view.select(line_no, &cursor1, &cursor2, false);
+                if pgh_view.is_code() {
+                    let lang = pgh_view.code_lang.clone().unwrap_or_else(||"".to_string());
+                    selected = format!("```{}\n{}\n```\n", lang, selected);
+                } else if selected.trim_end().is_empty() {
+                    //empty line
+                    selected = REPL_SPACE_LINE.to_string();
+                }
+                if line_no > 0 {
+                    //insert "\n\n" between text line for markdown
+                    if self.cfg.is_markdown && (pre_pgh_type != pgh_view.pgh_type || pre_pgh_type == PghType::Text && pgh_view.pgh_type ==  PghType::Text) {
+                        s += "\n\n"
+                    } else {
+                        s += "\n"
+                    }
+                }
+                s += &selected;
+                pre_pgh_type = pgh_view.pgh_type.clone();
+            } else {
+                if line_no > 0 {
                     s += "\n"
                 }
+                s += &pgh_view.select(line_no, &cursor1, &cursor2, true);
             }
-            s += &selected;
-
-            pre_pgh_type = pgh_view.pgh_type.clone();
         }
         s
     }
@@ -787,7 +857,7 @@ impl Ctx {
         self.set_cursors_to_min();
 
         for (i, (line_no, after_delete)) in line_set.iter().enumerate() {
-            println!("update {} to {:?}", line_no, after_delete);
+            log::debug!("update {} to {:?}", line_no, after_delete);
             undo_cmd.push_update(*line_no, self.get_line_clone(*line_no));
             for (segment, s) in after_delete.iter().enumerate() {
                 self.update_segment_text(*line_no, segment, s.to_string());
@@ -801,7 +871,7 @@ impl Ctx {
         for (line_no, after_delete) in line_set.iter().rev() {
             let new_s = after_delete.join("");
             if new_s.len() == 0 {
-                println!("delete line {}", *line_no);
+                log::debug!("delete line {}", *line_no);
                 undo_cmd.push_insert(*line_no, self.get_line_clone(*line_no));
                 self.pgh_views.remove(*line_no);
                 redo_cmd.push_delete(*line_no);
@@ -819,7 +889,7 @@ impl Ctx {
 
         //merge remain normal lines
         if remain_lines.len() == 2 {
-            println!("merge remain 2 lines");
+            log::debug!("merge remain 2 lines");
             let (first_line_no, first_s, first_segments) = remain_lines.last().unwrap();
             let (_, last_s, _) = remain_lines.first().unwrap();
             let last_line_no = first_line_no + 1;
@@ -844,7 +914,7 @@ impl Ctx {
                 }
             }
         }
-        println!("cursor after delete: {:?}", self.cursor2());
+        log::debug!("cursor after delete: {:?}", self.cursor2());
         return (undo_cmd, redo_cmd);
     }
 
@@ -911,14 +981,14 @@ impl Ctx {
             joins += "\n";
             need_delete_lines.push(*line);
         }
-        println!("on_content_change table:[{}]", joins);
+        log::debug!("on_content_change table:[{}]", joins);
 
         //check is table markdown
         if let Some(table) = self.check_to_table_pghview(&joins) {
             let mut undo_cmd = DoCmd::new();
             let mut redo_cmd = DoCmd::new();
             undo_cmd.set_cursor(self.cursor2());
-            println!("change to table [{}]", table.get_text());
+            log::debug!("change to table [{}]", table.get_text());
             for i in need_delete_lines.iter().rev() {
                 undo_cmd.push_insert(*i, self.get_line_clone(*i));
                 self.pgh_views.remove(*i);
@@ -986,7 +1056,6 @@ impl Ctx {
     }
 
     fn insert_line(&mut self, line_no: usize, s: String) {
-        println!("insert new line: {} {}", line_no, &s);
         let mut new_pgh_view = PghView::new_text();
         new_pgh_view.push_text(s, None);
         self.pgh_views.insert(line_no, new_pgh_view);
@@ -998,7 +1067,6 @@ impl Ctx {
         let org_c: Cursor = self.cursor2();
         let mut new_c = org_c;
 
-        println!("before insert: cursor={:?}", org_c);
         if let Some(pgh_view) = self.pgh_views.get_mut(org_c.line_no) {
             let (ls, rs, seg_text) = pgh_view.insert(&org_c, &s);
             if pgh_view.is_table() {
@@ -1025,7 +1093,6 @@ impl Ctx {
                         undo_cmd.push_update(line_no, self.get_line_clone(line_no));
                         self.update_all_text(line_no, line.to_string());
                         redo_cmd.push_update(line_no, self.get_line_clone(line_no));
-                        println!("line={}", line);
                     } else {
                         undo_cmd.push_delete(line_no);
                         self.insert_line(line_no, line.to_string());
@@ -1042,7 +1109,6 @@ impl Ctx {
             }
             self.set_cursor2(new_c);
             self.set_cursor1_reset();
-            println!("after insert: cursor={:?}", self.cursor2());
             redo_cmd.set_cursor(self.cursor2());
         }
         self.push_do(undo_cmd, redo_cmd);
@@ -1292,12 +1358,8 @@ impl Ctx {
         self.area.edit_rect.max.x
     }
 
-    pub fn is_pointer_gone(&self) -> bool {
-        self.state.is_pointer_gone
-    }
-
-    pub fn mark_pointer_gone(&mut self, is_gone: bool) {
-        self.state.is_pointer_gone = is_gone;
+    pub fn scroll_width(&self) -> f32 {
+        self.area.scroll_width
     }
 
     pub fn set_ime_area_changed(&mut self, flag: bool) {
@@ -1330,6 +1392,11 @@ impl Ctx {
             self.cfg.font_size = 6.0
         }
         //force flash all lines view
+        self.line_change_flash();
+    }
+
+    pub fn set_indent_size(&mut self, size: f32) {
+        self.cfg.indent_size = size.at_least(0.0);
         self.line_change_flash();
     }
 
@@ -1418,6 +1485,17 @@ impl Ctx {
             None
         }
     }
+
+    pub fn is_selected_line(&self, line_no: usize) -> bool {
+        if !self.is_selected() {
+            return false;
+        }
+        if self.state.cursor2 > self.state.cursor1 {
+            line_no >= self.state.cursor1.line_no && line_no <= self.state.cursor2.line_no
+        } else {
+            line_no >= self.state.cursor2.line_no && line_no <= self.state.cursor1.line_no
+        }
+    }
 }
 
 /// command
@@ -1430,12 +1508,61 @@ impl Ctx {
         self.cmd_list.pop()    
     }
 
-    pub fn insert_link_click_command(&mut self, link_info: LinkInfo) {
+    fn replace_passwd_url(&mut self, line_no: usize, url_info: UrlInfo, passwd: &str, new_title: &str) {
+        const URL_PREFIX: &str = "passwd:";
+        if let Some(pos) = url_info.text.find(URL_PREFIX) {
+            let url_text_prefix = url_info.text[0..pos+URL_PREFIX.len()].to_string();
+            let line_text = self.get_line_text(line_no);
+            if let Some(start) = line_text.find(&url_text_prefix) {
+                let end = start + url_info.text.len();
+                if end > line_text.len() {
+                    return;
+                }
+                let new_url_text = format!("{}{} \"{}\")", url_text_prefix, passwd, new_title);
+                let left = line_text[0..start].to_string();
+                let tail = line_text[end..].to_string();
+                let new_line_text = left + &new_url_text + &tail;
+                self.update_line_text(line_no, new_line_text);
+            }
+        }
+    }
+
+    fn execute_url(&mut self, line_no: usize, url_info: UrlInfo, is_clicked: bool, is_line_changed: bool) {
+        const URL_PREFIX: &str = "passwd:";
+        const ENC_PREFIX: &str = "cipher:";
+        
+        if url_info.url.starts_with(URL_PREFIX) && url_info.title.is_some() {
+            let passwd = url_info.url[URL_PREFIX.len()..].to_string();
+            let passwd_hided = passwd.chars().all(|c| c == '*');
+            let title = url_info.title.clone().unwrap();
+            if !passwd_hided {
+                //decrypt
+                if title.starts_with(ENC_PREFIX) {
+                    log::debug!("try decrypt content");
+                    let cipher = &title[ENC_PREFIX.len()..];
+                    if let Ok(title) = dec_content(cipher, &passwd) {
+                        self.replace_passwd_url(line_no, url_info, &passwd, &title)
+                    }
+                }
+                //encrypt
+                else if is_clicked {
+                    if let Ok(cipher) = enc_content(&title, &passwd) {
+                        let new_title = ENC_PREFIX.to_string() + &cipher;
+                        self.replace_passwd_url(line_no, url_info, "******", &new_title);
+                    }
+                }
+            }
+        } else {
+            self.insert_cmd(Command::OpenUrl(url_info))
+        }
+    }
+
+    pub fn insert_link_click_command(&mut self, line_no: usize, link_info: LinkInfo, is_clicked: bool, is_line_changed: bool) {
         match link_info {
-            LinkInfo::File(file) => self.insert_cmd(Command::OpenFile(file)),
-            LinkInfo::Link(url) => self.insert_cmd(Command::OpenUrl(url)),
-            LinkInfo::Image(image) => {
-                println!("todo: flash image: {:?}", image)
+            LinkInfo::File(file) => if is_clicked { self.insert_cmd(Command::OpenFile(file)) },
+            LinkInfo::Url(url_info) => self.execute_url(line_no, url_info, is_clicked, is_line_changed),
+            LinkInfo::Image(image) => if is_clicked {
+                log::debug!("todo: flash image: {:?}", image)
             },
         }
     }
@@ -1488,20 +1615,20 @@ impl Ctx {
                     }
                 }
                 self.line_change_tick(do_line.line);
-                println!("Insert {} => {}", do_line.line, (do_line.pgh_view).clone().unwrap().get_text());
+                log::debug!("Insert {} => {}", do_line.line, (do_line.pgh_view).clone().unwrap().get_text());
             }
             DoItem::Delete(do_line) => {
                 if do_line.line < self.pgh_views.len() {
                     self.pgh_views.remove(do_line.line);
                 }
-                println!("Delete {}", do_line.line);
+                log::debug!("Delete {}", do_line.line);
             }
             DoItem::Update(do_line) => {
                 if let Some(pgh_view) = &do_line.pgh_view {
                     self.update_pgh(do_line.line, pgh_view);
                 }
                 self.line_change_tick(do_line.line);
-                println!("Update {} => {}", do_line.line, (do_line.pgh_view).clone().unwrap().get_text())
+                log::debug!("Update {} => {}", do_line.line, (do_line.pgh_view).clone().unwrap().get_text())
             }
         }
     }

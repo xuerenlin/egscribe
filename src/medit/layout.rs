@@ -6,7 +6,7 @@ use eframe::egui::{
     PointerButton, Rect, Response, ScrollArea, Ui, Vec2, ViewportCommand, Widget
 };
 
-use crate::medit::{Ctx, Command, PghText, PghView, TEXT_TOP_SPACE, TEXT_BOTTOM_SPACE};
+use crate::medit::{ctx::HighlightRect, Command, Ctx, PghText, PghView, TEXT_BOTTOM_SPACE, TEXT_TOP_SPACE};
 
 pub struct Edit<'a> {
     ctx: &'a mut Ctx,
@@ -30,7 +30,7 @@ impl Edit<'_> {
                 since_the_epoch.as_secs() * 1000 + u64::from(since_the_epoch.subsec_millis());
             if !has_focus || ctx.check_switch_cursor_show(milliseconds) {
                 let cursor_rect = cursor_rect.expand2([1.0, 0.0].into());
-                ui.painter().rect_filled(
+                ui.painter_at(ctx.edit_rect()).rect_filled(
                     cursor_rect,
                     0.0,
                     ui.style().visuals.text_cursor.stroke.color,
@@ -41,13 +41,12 @@ impl Edit<'_> {
     }
 
     fn draw_select_rect(ui: &mut Ui, ctx: &Ctx) {
-        if let Some(rects) = ctx.get_cursor_rects() {
-            //println!("get_cursor_rects:{:?}", rects);
-            for rect in rects {
-                //let rect = rect.expand2(Vec2 { x: 0.0, y: 1.0 });
-                //let color = Color32::from_rgb(111, 111, 11);
-                let color = ui.style().visuals.selection.bg_fill.linear_multiply(0.5);
-                //let color = visuals.selection.bg_fill.linear_multiply(0.5);
+        if let Some(highlight_rects) = ctx.get_heighlight_rects() {
+            for hl_rect in highlight_rects {
+                let (rect, color) = match hl_rect {
+                    HighlightRect::Select(rect) => (rect, ctx.cfg().select_color().linear_multiply(0.5)),
+                    HighlightRect::SameText(rect) => (rect, ctx.cfg().same_text_color().linear_multiply(0.5)),
+                };
                 ui.painter_at(ctx.edit_rect()).rect_filled(rect, 0.0, color);
             }
         }
@@ -75,8 +74,6 @@ impl Edit<'_> {
         line_no_rect.set_top(pgh_rect.top());
         line_no_rect.set_bottom(pgh_rect.bottom());
 
-        //println!("line_no:{} top:{}", line_no, line_no_rect.top());
-
         //color
         let color = if sub_line {
             ui.style().visuals.weak_text_color()
@@ -95,12 +92,12 @@ impl Edit<'_> {
             core::f32::INFINITY,
         );
 
-        //height current cursor line
+        //hightlight current cursor line
         if active {
-            //let stroke = (1.0, ui.style().visuals.selection.bg_fill);
+            let painter = ui.painter_at(ctx.line_no_rect());
+            painter.rect_filled(line_no_rect, 0.0, ui.style().visuals.faint_bg_color);
             line_no_rect.set_width(2.0);
-            //ui.painter().rect_stroke(line_no_rect, 0.0, stroke);
-            ui.painter().rect_filled(line_no_rect, 0.0, ui.style().visuals.selection.bg_fill);
+            painter.rect_filled(line_no_rect, 0.0, ui.style().visuals.selection.bg_fill);
         }
     }
 
@@ -152,13 +149,15 @@ impl Edit<'_> {
             ctx.set_bottom_line(bottom_line);
             let space = (ctx.edit_rect().height()/2.0).max(0.0);
             ui.allocate_space(Vec2::new(0.0, space));
+
+            //scroll to the cursor pos
+            Self::scroll_check(ui, ctx);
         });
     }
 
     fn draw_edit_area(ui: &mut Ui, ctx: &mut Ctx, response: &mut Response) {
         ctx.highlight_refresh(ui);
         Self::draw_all_pgh(ui, ctx, response);
-
         Self::draw_select_rect(ui, ctx);
     }
 
@@ -191,31 +190,26 @@ impl Edit<'_> {
     }
 
     fn scroll_check(ui: &mut Ui, ctx: &mut Ctx) {
-        if let Some(rect) = ctx.clean_scroll_to_rect() {
-            println!("need scroll_to_rect: {:?}", rect);
-            ui.scroll_to_rect(rect, Some(Align::TOP));
-        }
-        
+        //when seleting to top/bottom, automatically adjust the cursor
         if ctx.is_selected() && ctx.is_selecting() && ctx.cursor1().line_no != ctx.cursor2().line_no {
             if let Some(curosr_line_rect) = ctx.get_cursor2_line_rect() {
                 let top_min = curosr_line_rect.top() - curosr_line_rect.height();
                 let bottom_max = curosr_line_rect.bottom() + curosr_line_rect.height();
                 if top_min < ctx.edit_rect().top() {
                     ctx.cursor2_move_up();
-                    let rect = curosr_line_rect.translate(Vec2::new(0.0, -ctx.font_heigh()));
-                    ui.scroll_to_rect(rect, None);
-                    return;
                 } else if bottom_max > ctx.edit_rect().bottom() {
                     ctx.cursor2_move_down();
-                    let rect = curosr_line_rect.translate(Vec2::new(0.0, ctx.font_heigh()));
-                    ui.scroll_to_rect(rect, None);
-                    return;
                 }
             }
         }
+
+        //scroll to rect seted at pagedown/pageup event
+        if let Some(rect) = ctx.clean_scroll_to_rect() {
+            ui.scroll_to_rect(rect, Some(Align::TOP));
+        }
         
-        let cursor_changed = ctx.cursor2_cmp_and_bakup();
-        if cursor_changed {
+        //cusror changed, ensure the corsor visible 
+        if ctx.cursor2_cmp_and_bakup() {
             if !ctx.cfg().is_markdown {
                 let c = ctx.cursor2();
                 if c.line_no < ctx.top_line() || c.line_no > ctx.bottom_line() {
@@ -223,14 +217,9 @@ impl Edit<'_> {
                     ctx.set_scroll_to_line(line_no);
                 }
             } else {
-                if let Some(mut curosr_line_rect) = ctx.get_cursor2_line_rect() {
-                    curosr_line_rect.set_left(ctx.edit_rect().left());
-                    curosr_line_rect.set_right(ctx.edit_rect().right());
-                    let is_fully_visible = ui.clip_rect().contains_rect(curosr_line_rect);
-                    if !is_fully_visible {
-                        ui.scroll_to_rect(curosr_line_rect, None);
-                        return;
-                    }
+                if let Some(mut curosr_line_rect) = ctx.get_pos_from_cursor(&ctx.cursor2()) {
+                    curosr_line_rect.set_width(ctx.scroll_width());
+                    ui.scroll_to_rect(curosr_line_rect, None);
                 }
             }
         }
@@ -259,9 +248,6 @@ impl Widget for Edit<'_> {
         max_rect.min.y = ui.cursor().top();
         self.ctx.set_rect(max_rect, line_no_rect.width(), scroll_bar_width);
         self.ctx.set_font_heigh(line_no_rect.height() + TEXT_TOP_SPACE + TEXT_BOTTOM_SPACE);
-
-        //scroll to the cursor pos
-        Self::scroll_check(ui, self.ctx);
         
         //layout
         let top = ui.cursor().left_top();
@@ -300,9 +286,9 @@ impl Widget for Edit<'_> {
         if let Some(pointer_pos) = ui.ctx().pointer_interact_pos() {
             if response.clicked() || 
                (response.hovered() && ui.input(|i| i.pointer.any_pressed())) {   
-                //let focused = ui.memory(|mem| mem.focused());
-                //println!("clicked or any_pressed, focused:{:?}, my-id:{:?} {}", focused, response.id, response.has_focus());
                 ui.memory_mut(|mem| mem.request_focus(response.id));
+
+                ui.ctx().send_viewport_cmd(ViewportCommand::IMEAllowed(true));
             }
             if response.double_clicked() {
                 self.ctx.set_cursor2_from_pos(&pointer_pos);
@@ -328,7 +314,7 @@ impl Widget for Edit<'_> {
             //change image to image-link in clipboard
             if ui.input(|i| i.modifiers.ctrl) {
                 if let Some(image_link) = self.ctx.try_get_image_from_clipboard() {
-                    println!("change image to image-link({}) in clipboard", image_link);
+                    log::debug!("change image to image-link({}) in clipboard", image_link);
                     ui.ctx().copy_text(image_link);
                 }
             }
@@ -344,7 +330,6 @@ impl Widget for Edit<'_> {
             ui.memory_mut(|mem| mem.set_focus_lock_filter(response.id, event_filter));
             let events = ui.input(|i| i.filtered_events(&event_filter));
             for event in &events {
-                //println!("has focus, do envent: {:?}", event);
                 Self::on_event(ui, &mut self.ctx, event);
             }
             //compare state and mark_state_change after process event
@@ -353,8 +338,6 @@ impl Widget for Edit<'_> {
             //draw frame, todo
             //ui.painter().rect_stroke(self.ctx.edit_rect(), 0.0, Stroke::new(1.0, Color32::RED));
             //ui.painter().rect_stroke(self.ctx.line_no_rect(), 0.0, Stroke::new(1.0, Color32::RED));
-
-            
         }
 
         //draw edit cursor
@@ -367,7 +350,7 @@ impl Widget for Edit<'_> {
 impl Edit<'_> {
     fn set_ime_cursor_area(ui: &mut Ui, ctx: &Ctx) {
         if let Some(rect) = ctx.get_pos_from_cursor(&ctx.cursor2()) {
-            ui.ctx().send_viewport_cmd(ViewportCommand::IMEAllowed(true));
+            //ui.ctx().send_viewport_cmd(ViewportCommand::IMEAllowed(true));
             ui.ctx().send_viewport_cmd(ViewportCommand::IMERect(rect));
         }
     }
@@ -376,20 +359,14 @@ impl Edit<'_> {
         match event {
             Event::MouseMoved(v) => true,
             Event::PointerMoved(pos) => {
-                //println!("{:?}", event);
-                ctx.mark_pointer_gone(false);
                 if ctx.is_selecting() {
                     //selecting
-                    if ctx.is_pos_in_edit_area(pos) {
-                        ctx.set_cursor2_from_pos(pos);
-                        ctx.flash_same_cache_with_seleted();
-                    }
+                    ctx.set_cursor2_from_pos(pos);
+                    ctx.flash_same_cache_with_seleted();
                 }
                 true
             }
             Event::PointerGone => {
-                //println!("{:?}", event);
-                ctx.mark_pointer_gone(true);
                 true
             }
             Event::PointerButton {
@@ -398,7 +375,6 @@ impl Edit<'_> {
                 pressed,
                 modifiers,
             } => {
-                //println!("{:?}", event);
                 if *button == PointerButton::Primary && *pressed && ctx.is_pos_in_edit_area(pos) {
                     //left-button down
                     ctx.set_cursor2_from_pos(pos);
@@ -426,7 +402,7 @@ impl Edit<'_> {
                 modifiers,
             } => {
                 if modifiers.ctrl {
-                    println!("{:?}", event);
+                    log::debug!("{:?}", event);
                     ctx.add_font_size(delta.y * 1.5);
                 }
 
@@ -444,6 +420,7 @@ impl Edit<'_> {
                 pressed: true,
                 ..
             } => {
+                log::debug!("{:?}", event);
                 if ctx.is_ime_area_changed() {
                     Self::set_ime_cursor_area(ui, ctx);
                     ctx.set_ime_area_changed(false);
@@ -526,16 +503,20 @@ impl Edit<'_> {
     fn on_ime_event(ui: &mut Ui, ctx: &mut Ctx, event: &Event) -> bool {
         match event {
             Event::Ime(ImeEvent::Commit(s)) => {
-                println!("{:?}", event);
+                log::debug!("{:?}", event);
                 ctx.insert(s.clone());
                 return true;
             }
             Event::Ime(ImeEvent::Enabled) => {
-                println!("{:?}", event);
+                log::debug!("{:?}", event);
                 return true;
             }
             Event::Ime(ImeEvent::Preedit(s)) => {
-                println!("{:?}", event);
+                log::debug!("{:?}", event);
+                return true;
+            }
+            Event::Ime(ImeEvent::Disabled) => {
+                log::debug!("{:?}", event);
                 return true;
             }
             _ => {
@@ -549,23 +530,24 @@ impl Edit<'_> {
             Event::Copy => {
                 let text = ctx.get_selected_text();
                 if text.len() > 0 {
-                    //println!("Copy [{}]", &text);
+                    log::debug!("{:?}", event);
                     ui.ctx().copy_text(text);
                 }
             }
             Event::Cut => {
                 let text = ctx.get_selected_text();
                 if text.len() > 0 {
-                    //println!("Cut [{}]", &text);
+                    log::debug!("{:?}", event);
                     ui.ctx().copy_text(text);
                 }
                 ctx.delete();
             }
             Event::Paste(text_to_insert) => {
-                //println!("Paste [{}]", text_to_insert);
+                log::debug!("{:?}", event);
                 ctx.insert(text_to_insert.clone());
             }
             Event::Text(text_to_insert) => {
+                log::debug!("{:?}", event);
                 ctx.insert(text_to_insert.clone());
             }
 

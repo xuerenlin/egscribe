@@ -25,7 +25,7 @@ impl ImageInfo {
                 };
 
             //save to file
-            println!("clipboard get image ok");
+            log::debug!("clipboard get image ok");
             let rgba_image = Self::color_image_to_rgba(&color_image);
             let _ = Self::save_as_png(rgba_image, &path);
 

@@ -3,7 +3,6 @@ use eframe::egui::{vec2, Image, Pos2, Rect, Response, Ui, Vec2};
 use regex::Regex;
 
 const SPACE_X: f32 = 8.0;
-const SPACE_INDENT_X: f32 = 16.0;
 
 fn pos_from_cursor(char_rect: &Option<Vec<CharRect>>, cursor: &Cursor) -> Option<Rect> {
     if let Some(char_rect) = char_rect {
@@ -147,8 +146,9 @@ impl PghIndent {
         ctx: &mut Ctx,
         line_no: usize,
         segment: usize,
+        indent_size: f32,
     ) -> Response {
-        let response = simple_allocate_rect(ui, ctx, SPACE_INDENT_X, ctx.font_heigh());
+        let response = simple_allocate_rect(ui, ctx, indent_size, ctx.font_heigh());
         //update rect info
         ctx.update_view(
             line_no,
@@ -446,7 +446,7 @@ impl PghIcon {
         line_no: usize,
         segment: usize,
         pgh_text: &Box<dyn PghItem>,
-    ) -> Response {
+    ) -> (Response, bool) {
         let row_height = ctx.font_heigh();
 
         //get pos and font-size for diffrent icon_type
@@ -469,11 +469,8 @@ impl PghIcon {
         pos.y += spacing_y;
 
         let id = format!("icon_{}_{}", line_no, segment);
-        let (rect, mut response) = ui.allocate_exact_size(icon_size, ctx.sense());
-        if icon::icon_button(ui, id, pos, icon_name, font_size) {
-            println!("icon clicked");
-            response.clicked = true;
-        }
+        let (rect, response) = ui.allocate_exact_size(icon_size, ctx.sense());
+        let clicked = icon::icon_button(ui, id, pos, icon_name, font_size);
         
         //update rect info
         ctx.update_view(
@@ -483,7 +480,7 @@ impl PghIcon {
             item_char_rect(&response.rect),
         );
 
-        response
+        (response, clicked)
     }
 }
 
@@ -541,21 +538,22 @@ impl PghImage {
             }
         };
         
-        //println!("show image:[{}] is_ok:{}", image.url, std::fs::metadata(&image.url).is_ok());
         let width = ui.available_width();
         let response = ui.add(
             Image::new(&url)
                 .fit_to_original_size(1.0)
                 .max_width(width*0.95)
-                .rounding(10.0),
+                .corner_radius(10.0),
         );
         
-        //update rect info
+        //update zero-rect, because the image cannot has the cursor
+        let mut zero_rect = response.rect;
+        zero_rect.set_width(0.0);
         ctx.update_view(
             line_no,
             segment,
-            response.rect,
-            item_char_rect(&response.rect),
+            zero_rect, 
+            item_char_rect(&zero_rect),
         );
 
         response

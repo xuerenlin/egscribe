@@ -2,7 +2,7 @@ use crate::medit::{CharRect, Ctx, Cursor, PghItem, IconName};
 use core::f32;
 use eframe::egui::epaint::text::{FontFamily, TextFormat, LayoutJob};
 use eframe::egui::{
-    epaint, Color32, FontSelection, Galley, NumExt, Pos2, Rect, Response, Ui,
+    epaint, Align, Color32, FontSelection, Galley, NumExt, Pos2, Rect, Response, Stroke, StrokeKind, Ui, Vec2
 };
 use std::sync::Arc;
 
@@ -75,35 +75,40 @@ impl PghText {
     }
 
     fn layout_get_char_rect(
-        pgh_rect: Rect,
+        outer: Rect,
         spacing_top: f32,
         spacing_bottom: f32,
         galley: Arc<Galley>,
-        expand: bool,
-    ) -> Vec<CharRect> {
-        let mut end_rect = pgh_rect;
-        let mut char_rect = vec![];
+        need_expand: bool,
+    ) -> (Vec<CharRect>, Rect) {
+        let mut end_rect = outer;
+        let mut char_rect_list = vec![];
         let mut next_ch_i = 0;
-
-        end_rect.min.y -= spacing_top;
-        end_rect.max.y += spacing_bottom;
+        let mut pgh_rect = Rect::from_min_max(outer.left_top(), outer.left_top());
 
         let rnum = galley.rows.len();
         for (i, r) in galley.rows.iter().enumerate() {
             let off_top = if i == 0 { spacing_top } else { 0.0 };
             let off_bottom = if i + 1 == rnum { spacing_bottom } else { 0.0 };
+            let mut max_height = 0.0;
+
+            end_rect = r.rect.translate(outer.left_top().to_vec2());
+            end_rect.min.y -= spacing_top;
+            end_rect.max.y += spacing_bottom;
 
             for gl in &r.glyphs {
                 let min = Pos2 {
-                    x: pgh_rect.min.x + gl.pos.x,
-                    y: pgh_rect.min.y + r.rect.min.y - off_top,
+                    x: outer.min.x + gl.pos.x,
+                    y: outer.min.y + r.rect.min.y - off_top,
                 };
                 let max = Pos2 {
-                    x: pgh_rect.min.x + gl.pos.x + gl.size.x,
-                    y: pgh_rect.min.y + r.rect.max.y + off_bottom,
+                    x: outer.min.x + gl.pos.x + gl.advance_width, //gl.uv_rect.size.x,
+                    y: outer.min.y + r.rect.min.y + gl.line_height + off_bottom,
                 };
-                char_rect.push(CharRect::new(
-                    Rect::from_min_max(min, max),
+                let rect = Rect::from_min_max(min, max);
+                //log::debug!("{} {:?} rect-height:{} top:{} bottom:{}", gl.chr, rect, rect.height(), off_top, off_bottom);
+                char_rect_list.push(CharRect::new(
+                    rect,
                     next_ch_i,
                     gl.chr,
                     off_top,
@@ -111,20 +116,84 @@ impl PghText {
                 ));
                 next_ch_i += 1;
 
-                end_rect = Rect::from_min_max(Pos2 { x: max.x, y: min.y }, max);
+                max_height = max_height.at_least(rect.height());
+                end_rect = Rect::from_min_size(rect.right_top(), Vec2{x:0.0, y:max_height});
+                pgh_rect = pgh_rect.union(rect);
             }
 
             //end pos for last row
-            if expand {
-                end_rect.set_right(pgh_rect.max.x);
+            if need_expand {
+                end_rect.set_right(outer.max.x);
             }
-
-            char_rect.push(CharRect::new(
+            char_rect_list.push(CharRect::new(
                 end_rect, next_ch_i, '\0', off_top, off_bottom,
             ));
+            pgh_rect = pgh_rect.union(end_rect);
         }
 
-        char_rect
+        (char_rect_list, pgh_rect)
+    }
+
+
+    pub fn text_layout_in_ui(
+        ctx: &mut Ctx, 
+        ui: &mut Ui, 
+        text: String,
+        job: &Option<LayoutJob>,
+        outer: Rect,
+        wrap_width: f32,
+        need_expand: bool,
+        once_allocate: bool,
+    ) -> (Pos2, Arc<Galley>, Response) {
+        
+        let cursor = ui.cursor();
+        let pos = Pos2{x: outer.left(), y: cursor.top()};
+        let first_row_indentation = (cursor.left() - outer.left()).at_least(0.0);
+
+        let mut layout_job = 
+            if let Some(layout_job) = job {
+                layout_job.clone()
+            } else {
+                let text_color = ctx.cfg().text_color();
+                let font_id = FontSelection::Default.resolve(ui.style());
+                LayoutJob::simple(text, font_id.clone(), text_color, wrap_width)
+            };
+        
+        layout_job.wrap.max_width = wrap_width;
+        layout_job.wrap.break_anywhere = true;
+        layout_job.first_row_min_height = cursor.height();
+        layout_job.halign = Align::Min;
+        layout_job.justify = false;
+        
+        if let Some(first_section) = layout_job.sections.first_mut() {
+            first_section.leading_space = first_row_indentation;
+        }
+        let galley = ui.fonts(|fonts| fonts.layout_job(layout_job));
+
+        
+        let mut rsp_rect = Rect::from_min_max(outer.left_top(), outer.left_top());
+        let mut row_rects = vec![];
+        let row_count = galley.rows.len();
+        for (i, row) in galley.rows.iter().enumerate() {
+            let mut rect = row.rect.translate(pos.to_vec2());
+            if need_expand || (wrap_width.is_finite() && i+1 < row_count) {
+                rect.set_right(outer.right());
+            }
+            row_rects.push(rect);
+            rsp_rect = rsp_rect.union(rect);
+        }
+
+        //need onlly allocate only one time in table
+        if once_allocate {
+            let response = ui.allocate_rect(rsp_rect, ctx.sense());
+            (pos, galley, response)
+        } else {
+            let mut response = ui.allocate_rect(Rect::from_min_max(outer.left_top(), outer.left_top()), ctx.sense());
+            for rect in row_rects {
+                response |= ui.allocate_rect(rect, ctx.sense());
+            }
+            (pos, galley, response)
+        }
     }
 
     pub fn layout_paragraph(
@@ -132,56 +201,35 @@ impl PghText {
         ctx: &mut Ctx,
         line_no: usize,
         segment: usize,
+        outer: Rect,
         warp_width: f32,
         spacing_top: f32,
         spacing_bottom: f32,
-        need_expand_x: bool,
+        need_expand: bool,
+        once_allocate: bool,
         text: String,
         layout_job: &Option<LayoutJob>,
     ) -> Response {
-        let pos = ui.cursor().left_top();
-        let text_color = ctx.cfg().text_color();
-        let outer_rect = ctx.edit_rect();
-
-        let (galley, pgh_rect) = Self::layout_text(
-            ui,
-            outer_rect,
-            text.clone(),
-            layout_job,
+        //layout galley
+        let (pos, galley, response) 
+            = Self::text_layout_in_ui(ctx, ui, text.clone(), layout_job, outer, warp_width, need_expand, once_allocate);
+        
+        //paint text
+        ui.painter_at(ctx.edit_rect()).add(epaint::TextShape::new(
             pos,
-            text_color,
-            None,
-            warp_width,
-        );
+            galley.clone(),
+            ctx.cfg().text_color(),
+        ));
 
-        //expand rect
-        let mut expand_rect_x = pgh_rect;
-        //Add 8.0, Ensure that clicking on the right side of the last character can locate the cursor
-        if expand_rect_x.right() < ctx.edit_right() {
-            expand_rect_x.set_right((pos.x + warp_width + 8.0).at_most(ctx.edit_right()));
-        }
-
-        let char_rect = Self::layout_get_char_rect(
-            expand_rect_x,
+        let rect = Rect::from_min_size(pos, outer.size());
+        let (char_rect_list, pgh_rect) = Self::layout_get_char_rect(
+            rect,
             spacing_top,
             spacing_bottom,
             galley,
-            need_expand_x,
+            need_expand,
         );
-
-        let response = if need_expand_x {
-            let mut expand_rect_xy = expand_rect_x;
-            expand_rect_xy.min.y -= spacing_top;
-            expand_rect_xy.max.y += spacing_bottom;
-            ctx.update_view(line_no, segment, expand_rect_xy, char_rect);
-            ui.allocate_rect(expand_rect_x, ctx.sense())
-        } else {
-            let mut expand_rect_y = pgh_rect;
-            expand_rect_y.min.y -= spacing_top;
-            expand_rect_y.min.y += spacing_bottom;
-            ctx.update_view(line_no, segment, expand_rect_y, char_rect);
-            ui.allocate_rect(pgh_rect, ctx.sense())
-        };
+        ctx.update_view(line_no, segment, pgh_rect, char_rect_list);
 
         response
     }
@@ -206,7 +254,6 @@ impl PghText {
             //same line
             del_min = min.clone();
             del_max = max.clone();
-            //println!("{:?} - {:?}", del_min, del_max);
         } else if line_no == min.line_no {
             //first line
             del_min = min.clone();
@@ -258,7 +305,6 @@ impl PghText {
             })
             .collect::<String>();
 
-        //println!("after s: {}", after);
         return Some(after);
     }
 
@@ -289,7 +335,6 @@ impl PghText {
             })
             .collect::<String>();
 
-        //println!("after s: {}", after);
         Some(after)
     }
 }
@@ -321,14 +366,11 @@ impl PghItem for PghText {
                 } else {
                     rect.min.x + rect.width() / 2.0
                 };
-                //println!("pos:{} i:{} c_rect:{:?} middle:{}", pos, i, c_rect, middle);
                 if middle >= pos.x && rect.min.y <= pos.y && rect.max.y >= pos.y {
-                    //println!("from_pos {}->{:?}", pos, self.cursor);
                     return Some(Cursor {
                         line_no,
                         segment,
                         culumn: c_rect.i,
-                        //culmax: plist.len()-1
                     });
                 }
             }
@@ -344,7 +386,6 @@ impl PghItem for PghText {
                     zero_width_rect.set_width(0.0);
                     zero_width_rect.min.y += c_rect.top;
                     zero_width_rect.max.y -= c_rect.bottom;
-                    //println!("from_cursor {:?} -> {}", self.cursor, c_rect.rect);
                     return Some(zero_width_rect);
                 }
             }

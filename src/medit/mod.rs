@@ -3,6 +3,7 @@
 
 const TEXT_TOP_SPACE: f32 = 1.0;
 const TEXT_BOTTOM_SPACE: f32 = 1.0;
+const REPL_SPACE_LINE: &str = "{{SPACE_LINE}}";
 
 pub mod ctx;
 pub mod icon;
@@ -19,7 +20,7 @@ pub mod image;
 pub use ctx::Ctx;
 pub use items::PghCheckBox;
 pub use layout::Edit;
-pub use md::{LinkInfo, MarkDownImpl};
+pub use md::{LinkInfo, MarkDownImpl, UrlInfo};
 pub use cursor::Cursor;
 pub use pgh::{CharRect, PghItem, SegmentType, PghType, PghView, TableInfo};
 pub use text::PghText;
