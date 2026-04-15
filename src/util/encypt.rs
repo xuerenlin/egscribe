@@ -5,15 +5,15 @@ use crypto::hmac::Hmac;
 use crypto::sha2::Sha256;
 use base64::{Engine as _, engine::general_purpose};
 
-const SALT: &[u8] = b"fixed_salt_for_demo"; // 实际应用中应使用随机盐
-const ITERATIONS: u32 = 10; // PBKDF2 迭代次数
+const SALT: &[u8] = b"fixed_salt_for_demo"; // In actual applications, random salt should be used
+const ITERATIONS: u32 = 10; // PBKDF2 iteration count
 
-/// 加密 content 并返回 Base64 编码的密文
+/// Encrypt content and return Base64 encoded ciphertext
 pub fn enc_content(content: &str, passwd: &str) -> Result<String, String> {
-    // 1. 生成密钥和 IV
+    // 1. Generate key and IV
     let (key, iv) = derive_key_and_iv(passwd)?;
 
-    // 2. 初始化加密器
+    // 2. Initialize encryptor
     let mut encryptor = aes::cbc_encryptor(
         aes::KeySize::KeySize256,
         &key,
@@ -21,7 +21,7 @@ pub fn enc_content(content: &str, passwd: &str) -> Result<String, String> {
         blockmodes::PkcsPadding,
     );
 
-    // 3. 加密数据
+    // 3. Encrypt data
     let mut result = Vec::<u8>::new();
     let mut read_buffer = buffer::RefReadBuffer::new(content.as_bytes());
     let mut buffer = [0; 4096];
@@ -40,22 +40,22 @@ pub fn enc_content(content: &str, passwd: &str) -> Result<String, String> {
         }
     }
 
-    // 4. 返回 Base64 编码的密文
+    // 4. Return Base64 encoded ciphertext
     Ok(general_purpose::STANDARD.encode(&result))
 }
 
-/// 解密 Base64 编码的密文并返回明文
+/// Decrypt Base64 encoded ciphertext and return plaintext
 pub fn dec_content(content: &str, passwd: &str) -> Result<String, String> {
-    // 1. Base64 解码
+    // 1. Base64 decode
     let ciphertext = match general_purpose::STANDARD.decode(content) {
         Ok(data) => data,
         Err(e) => return Err(format!("Base64 decode failed: {}", e)),
     };
 
-    // 2. 生成密钥和 IV
+    // 2. Generate key and IV
     let (key, iv) = derive_key_and_iv(passwd)?;
 
-    // 3. 初始化解密器
+    // 3. Initialize decryptor
     let mut decryptor = aes::cbc_decryptor(
         aes::KeySize::KeySize256,
         &key,
@@ -63,7 +63,7 @@ pub fn dec_content(content: &str, passwd: &str) -> Result<String, String> {
         blockmodes::PkcsPadding,
     );
 
-    // 4. 解密数据
+    // 4. Decrypt data
     let mut result = Vec::<u8>::new();
     let mut read_buffer = buffer::RefReadBuffer::new(&ciphertext);
     let mut buffer = [0; 4096];
@@ -82,14 +82,14 @@ pub fn dec_content(content: &str, passwd: &str) -> Result<String, String> {
         }
     }
 
-    // 5. 返回 UTF-8 字符串
+    // 5. Return UTF-8 string
     match String::from_utf8(result) {
         Ok(s) => Ok(s),
         Err(e) => Err(format!("UTF-8 conversion failed: {}", e)),
     }
 }
 
-/// 使用 PBKDF2 从密码派生密钥和 IV
+/// Derive key and IV from password using PBKDF2
 fn derive_key_and_iv(passwd: &str) -> Result<([u8; 32], [u8; 16]), String> {
     let mut key = [0u8; 32];
     let mut iv = [0u8; 16];

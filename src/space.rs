@@ -1,12 +1,13 @@
 use core::f32;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::{fs, vec};
 use std::path::PathBuf;
-use crate::medit::ctx::EditCfg;
-use crate::medit::{IconName, MarkDownImpl, Command};
-use crate::ToolBar;
-use crate::mem::Config;
-use eframe::egui::{collapsing_header, Button, Color32, Frame, Rect, Stroke, Ui, Widget, Window, Vec2, Response, Order};
+use crate::medit::cfg::EditCfg;
+use crate::uicom::{IconName, CONTROL_HIGHLIGHT, galley_builder, icon_button_builder};
+use crate::medit::{MarkDownImpl, Action, cfg::HeightMode};
+use crate::config::Config;
+use crate::i18n::tr;
+use eframe::egui::{collapsing_header, Button, Color32, Frame, Label, Rect, RichText, Stroke, Ui, Widget, Window, Vec2, Response, Order};
 
 #[derive(Debug)]
 pub struct  RenameWin {
@@ -51,7 +52,7 @@ impl RenameWin {
             rect.min = pointer_pos;
         }
         let mut need_rename = false;
-        let title = format!("rename");
+        let title = tr("space.rename.title");
         let egui_ctx = ui.ctx();
         Window::new(title)
             .default_rect(rect)
@@ -66,7 +67,7 @@ impl RenameWin {
                         self.need_focus = false;
                         r.request_focus();
                     }
-                    if ui.button("rename").clicked() {
+                    if ui.button(tr("space.rename.button")).clicked() {
                         need_rename = true;
                     }
                 });
@@ -104,7 +105,7 @@ impl NoteSpace {
     /// 
     fn comfirm_window(ui: &mut Ui, name: &str) -> Option<bool> {
         let mut ret = None;
-        let title = format!("Delete file confirmation");
+        let title = tr("space.delete.confirm.title");
         let egui_ctx = ui.ctx();
 
         let size = Vec2::new(128.0, 30.0);
@@ -121,13 +122,13 @@ impl NoteSpace {
             .order(Order::TOP)
             .show(egui_ctx, |ui| {
                 ui.horizontal(|ui|{
-                    ui.label("Are you sure delete");
+                    ui.label(tr("space.delete.confirm.message"));
                     ui.colored_label(Color32::RED, name);
                     ui.label("?");
-                    if ui.button("Ok").clicked() {
+                    if ui.button(tr("space.delete.confirm.ok")).clicked() {
                         ret = Some(true);
                     }
-                    if ui.button("Cancel").clicked() {
+                    if ui.button(tr("space.delete.confirm.cancel")).clicked() {
                         ret = Some(false);
                     }
                 });
@@ -143,12 +144,175 @@ impl NoteSpace {
         //let radius = eframe::egui::lerp(2.0..=3.0, openness);
         ui.painter().circle_filled(response.rect.center(), 2.0, stroke.color);
     }
+
+    /// 索引行右键菜单内的条目（固定 / 新建 / 重命名 / 删除）。
+    fn index_row_context_menu_items(
+        ui: &mut Ui,
+        space: &mut NoteSpace,
+        config: &Config,
+        name: &str,
+        cmd: &mut Option<Action>,
+    ) {
+        let is_fixed = config.fixed_files.contains(&name.to_string());
+        let fixed_icon = if is_fixed {
+            IconName::icon_unfixed
+        } else {
+            IconName::icon_fixed
+        };
+        let fixed_text = if is_fixed {
+            tr("space.index.unfix_note.tooltip")
+        } else {
+            tr("space.index.fix_note.tooltip")
+        };
+        if Button::new(
+            galley_builder(ui)
+                .icon(fixed_icon)
+                .text(format!(" {}", fixed_text))
+                .build(),
+        )
+        .ui(ui)
+        .clicked()
+        {
+            if is_fixed {
+                *cmd = Some(Action::unfixed_file(name.to_string()));
+            } else {
+                *cmd = Some(Action::fixed_file(name.to_string()));
+            }
+        }
+        if Button::new(
+            galley_builder(ui)
+                .icon(IconName::icon_new)
+                .text(format!(" {}", tr("space.index.new_note.tooltip")))
+                .build(),
+        )
+        .ui(ui)
+        .clicked()
+        {
+            *cmd = Some(Action::new_file(Some(name.to_string())));
+        }
+        if Button::new(
+            galley_builder(ui)
+                .icon(IconName::icon_file_rename)
+                .text(format!(" {}", tr("space.index.rename_note.tooltip")))
+                .build(),
+        )
+        .ui(ui)
+        .clicked()
+        {
+            *cmd = Some(Action::rename_file(name.to_string()));
+        }
+        if Button::new(
+            galley_builder(ui)
+                .icon(IconName::icon_delete)
+                .text(format!(" {}", tr("space.index.delete_note.tooltip")))
+                .build(),
+        )
+        .ui(ui)
+        .clicked()
+        {
+            space.index_window.delete_confirm = Some(name.to_string());
+        }
+    }
+
+    /// 新版：在展开按钮与标题上挂右键上下文菜单。
+    fn index_row_attach_context_menu(
+        space: &mut NoteSpace,
+        config: &Config,
+        toggle_resp: Response,
+        row_label_resp: Response,
+        name: &str,
+        cmd: &mut Option<Action>,
+    ) {
+        if space.index_window.delete_confirm.is_some() {
+            return;
+        }
+        toggle_resp.union(row_label_resp).context_menu(|ui| {
+            Self::index_row_context_menu_items(ui, space, config, name, cmd);
+        });
+    }
+
+    /// 旧版：鼠标悬停在本行时于右侧显示工具栏图标。
+    ///
+    /// 默认已不再调用；若需恢复旧交互，可在 `show_sub_index` 的非根分支中改调用此函数。
+    #[allow(dead_code)]
+    fn index_row_attach_hover_toolbar_legacy(
+        space: &mut NoteSpace,
+        config: &Config,
+        ui: &mut Ui,
+        name: &str,
+        row_label_resp: &Response,
+        cmd: &mut Option<Action>,
+    ) {
+        let Some(pointer_pos) = ui.ctx().pointer_interact_pos() else {
+            return;
+        };
+        let mut line_rect = row_label_resp.rect;
+        line_rect.set_right(ui.max_rect().right());
+        if !line_rect.contains(pointer_pos) || space.index_window.delete_confirm.is_some() {
+            return;
+        }
+
+        let is_fixed = config.fixed_files.contains(&name.to_string());
+        let fixed_icon = if is_fixed {
+            IconName::icon_unfixed
+        } else {
+            IconName::icon_fixed
+        };
+        if icon_button_builder(ui)
+            .icon(fixed_icon)
+            .hover_text(if is_fixed {
+                tr("space.index.unfix_note.tooltip")
+            } else {
+                tr("space.index.fix_note.tooltip")
+            })
+            .build_tool()
+            .clicked()
+        {
+            if is_fixed {
+                *cmd = Some(Action::unfixed_file(name.to_string()));
+            } else {
+                *cmd = Some(Action::fixed_file(name.to_string()));
+            }
+        }
+
+        if icon_button_builder(ui)
+            .icon(IconName::icon_new)
+            .hover_text(tr("space.index.new_note.tooltip"))
+            .build_tool()
+            .clicked()
+        {
+            *cmd = Some(Action::new_file(Some(name.to_string())));
+        }
+        if icon_button_builder(ui)
+            .icon(IconName::icon_file_rename)
+            .hover_text(tr("space.index.rename_note.tooltip"))
+            .build_tool()
+            .clicked()
+        {
+            *cmd = Some(Action::rename_file(name.to_string()));
+        }
+        if icon_button_builder(ui)
+            .icon(IconName::icon_delete)
+            .hover_text(tr("space.index.delete_note.tooltip"))
+            .build_tool()
+            .clicked()
+        {
+            space.index_window.delete_confirm = Some(name.to_string());
+        }
+    }
     
-    fn show_sub_index(&mut self, config: &mut Config, ui: &mut Ui, name: &str, deep: usize) -> Option<Command> {
+    fn show_sub_index(&mut self, config: &mut Config, ui: &mut Ui, name: &str, deep: usize, visited: &mut HashSet<String>) -> Option<Action> {
         let mut cmd = None;
         if deep > 10 {
             return cmd;
         }
+        // 检查循环引用：如果当前节点已经在访问路径中，则跳过以避免无限递归
+        if visited.contains(name) {
+            return cmd;
+        }
+        // 将当前节点添加到已访问集合中
+        visited.insert(name.to_string());
+        
         let childs = self.get_child_links(name);
         let id = ui.make_persistent_id(name);
         let is_open = config.tree_open_state_is_open(name);
@@ -162,96 +326,94 @@ impl NoteSpace {
         let header_res = ui.horizontal(|ui|{
             ui.spacing_mut().item_spacing.x = 2.0;
 
-            if childs.len() > 0 {
-                state.show_toggle_button(ui, collapsing_header::paint_default_icon);
+            let toggle_resp = if childs.len() > 0 {
+                state.show_toggle_button(ui, collapsing_header::paint_default_icon)
             } else {
-                state.show_toggle_button(ui, Self::circle_icon);
-            }
-            
-            let r = if name == "." {
-                ui.label("Note")
+                state.show_toggle_button(ui, Self::circle_icon)
+            };
+
+            let r = if config.fixed_files.contains(&name.to_string()) {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    let name_btn = Button::new(RichText::new(show_name).strong())
+                        .fill(Color32::TRANSPARENT)
+                        .ui(ui);
+                    let pin_galley = galley_builder(ui)
+                        .icon(IconName::icon_fixed)
+                        .fg(CONTROL_HIGHLIGHT)
+                        .build();
+                    let pin_lbl = ui.add(Label::new(pin_galley).selectable(false));
+                    name_btn.union(pin_lbl)
+                })
+                .inner
             } else {
-                Button::new(show_name).fill(Color32::TRANSPARENT).ui(ui)
+                Button::new(RichText::new(show_name))
+                    .fill(Color32::TRANSPARENT)
+                    .ui(ui)
             };
             if r.clicked() {
                 self.index_window.need_open = Some(name.to_string());
-                cmd = Some(Command::OpenFile(name.to_string()));
+                cmd = Some(Action::open_file(name.to_string()));
             }
 
-            let is_fiex_in_toolbar = config.fixed_files.contains(&name.to_string());
-
-            //unfixed button
-            if is_fiex_in_toolbar {
-                if ToolBar::tool_icon_button(ui, IconName::icon_unfixed, false, false, "UnFixed from toolbar").clicked() {
-                    cmd = Some(Command::UnFixedFile(name.to_string()));
-                }
-            }
-
-            if name == "." {
-                //new file button
-                if ToolBar::tool_icon_button(ui, IconName::icon_new, false, false, "New file").clicked(){
-                    if name == "." {
-                        cmd = Some(Command::NewFile(None));
-                    } else {
-                        cmd = Some(Command::NewFile(Some(name.to_string())));
-                    }
-                }
-                //refresh button
-                if ToolBar::tool_icon_button(ui, IconName::icon_refresh, false, false, "Refresh index").clicked() {
-                    self.flash_data();
-                }
-            } else {
-                //mouse pos is in this line, show tool buttons
-                if let Some(pointer_pos) = ui.ctx().pointer_interact_pos() {
-                    let mut line_rect = r.rect;
-                    line_rect.set_right(ui.max_rect().right());
-                    if line_rect.contains(pointer_pos) && self.index_window.delete_confirm.is_none() {
-                        //let frame = line_rect.expand(2.0);
-                        //ui.painter().rect_stroke(frame, 3.0, Stroke::new(1.0,ui.style().visuals.selection.bg_fill));
-
-                        //fixed to tool-bar
-                        if name != "." && !is_fiex_in_toolbar {
-                            if ToolBar::tool_icon_button(ui, IconName::icon_fixed, false, false, "Fixed to toolbar").clicked() {
-                                cmd = Some(Command::FixedFile(name.to_string()));
-                            }
-                        }
-                        //new file button
-                        if ToolBar::tool_icon_button(ui, IconName::icon_new, false, false, "New file").clicked(){
-                            if name == "." {
-                                cmd = Some(Command::NewFile(None));
-                            } else {
-                                cmd = Some(Command::NewFile(Some(name.to_string())));
-                            }
-                        }
-                        //rename file button
-                        if ToolBar::tool_icon_button(ui, IconName::icon_file_rename, false, false, "Rename file").clicked() {
-                            cmd = Some(Command::RenameFile(name.to_string()));
-                        }
-                        //delete file button
-                        if ToolBar::tool_icon_button(ui, IconName::icon_delete, false, false, "Delete file").clicked() {
-                            self.index_window.delete_confirm = Some(name.to_string()); //show comfirm window
-                        }
-                    }
-                }
-            }
+            // 新版：右键上下文菜单（菜单条目见 `index_row_context_menu_items`）。
+            Self::index_row_attach_context_menu(self, config, toggle_resp, r, name, &mut cmd);
+            // 旧版悬停工具栏（保留以便回退）：
+            // Self::index_row_attach_hover_toolbar_legacy(self, config, ui, name, &r, &mut cmd);
         });
 
         state.show_body_indented(&header_res.response, ui, |ui| {
             for c in childs {
-                let sub_cmd = self.show_sub_index(config, ui, &c, deep+1);
+                let sub_cmd = self.show_sub_index(config, ui, &c, deep+1, visited);
                 if sub_cmd.is_some() {
                     cmd = sub_cmd;
                 }
             }
         });
+        // 递归返回后，从 visited 中移除当前节点，允许在其他路径中再次访问
+        visited.remove(name);
         cmd
     }
 
-    fn show_root_index(&mut self, config: &mut Config, ui: &mut Ui) -> Option<Command> {
-        self.show_sub_index(config, ui, ".", 0)
+    fn show_root_index(&mut self, config: &mut Config, ui: &mut Ui) -> Option<Action> {
+        let mut cmd = None;
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            ui.label(tr("space.index.note"));
+
+            // new root note button
+            if icon_button_builder(ui)
+                .icon(IconName::icon_new)
+                .hover_text(tr("space.index.new_note.tooltip"))
+                .build_tool()
+                .clicked()
+            {
+                cmd = Some(Action::new_file(None));
+            }
+
+            // refresh button
+            if icon_button_builder(ui)
+                .icon(IconName::icon_refresh)
+                .hover_text(tr("space.index.refresh.tooltip"))
+                .build_tool()
+                .clicked()
+            {
+                self.flash_data();
+            }
+        });
+        ui.add_space(2.0);
+
+        let mut visited = HashSet::new();
+        for c in self.get_child_links(".") {
+            let sub_cmd = self.show_sub_index(config, ui, &c, 0, &mut visited);
+            if sub_cmd.is_some() {
+                cmd = sub_cmd;
+            }
+        }
+        cmd
     }
 
-    pub fn show_index_window(&mut self, config: &mut Config, ui: &mut Ui, rect: Rect, outer_rect: Rect) -> Option<Command> {
+    pub fn show_index_window(&mut self, config: &mut Config, ui: &mut Ui, rect: Rect, outer_rect: Rect) -> Option<Action> {
         let mut cmd = None;
         if self.index_window.is_show == false {
             return None;
@@ -265,7 +427,7 @@ impl NoteSpace {
             ..Default::default()
         };
         
-        let title = format!("HOME");
+        let title = tr("space.index.home.title");
         let egui_ctx = ui.ctx();
         let mut is_show = self.index_window.is_show;
         Window::new(title)
@@ -292,7 +454,7 @@ impl NoteSpace {
         cmd
     }
 
-    pub fn show_index_view(&mut self, config: &mut Config, ui: &mut Ui, rect: Rect, outer_rect: Rect) -> Option<Command>{
+    pub fn show_index_view(&mut self, config: &mut Config, ui: &mut Ui, rect: Rect, outer_rect: Rect) -> Option<Action>{
         config.tree_open_state_changed = false;
         let mut cmd = if self.index_window.is_window {
             self.show_index_window(config, ui, rect, outer_rect)
@@ -305,7 +467,7 @@ impl NoteSpace {
             match Self::comfirm_window(ui, delete_confirm) {
                 Some(need_delete) => {
                     if need_delete {
-                        cmd = Some(Command::DeleteFile(delete_confirm.clone()));
+                        cmd = Some(Action::delete_file(delete_confirm.clone()));
                     }
                     self.index_window.delete_confirm = None;    //close comfirm window
                 }
@@ -313,11 +475,12 @@ impl NoteSpace {
             }
         }
 
-        //close this window when need open file
+        //close this window when need open note
         if self.index_window.is_window {
-            match cmd {
-                Some(Command::OpenFile(_)) => self.close_index_window(),
-                _ => {}
+            if let Some(ref cmd_ref) = cmd {
+                if cmd_ref.command == "open_file" {
+                    self.close_index_window();
+                }
             }
         }
 
@@ -422,7 +585,7 @@ impl UniFile {
 #[derive(Clone,Debug)]
 pub struct FileCache {
     pub content: String,
-    pub links: Vec<String>,
+    pub links: HashMap<String, ()>,
 }
 
 pub struct NoteSpace {
@@ -468,23 +631,31 @@ impl NoteSpace {
     }
 
     fn set_work_dir(&mut self) {
-        let exe_path = std::env::current_exe().unwrap();
-        let mut parent_dir = exe_path.parent().map(|p| p.to_path_buf()).unwrap();
-        parent_dir.push("note");
-        self.work_dir = parent_dir;
+        let exe_note_dir = std::env::current_exe()
+            .ok()
+            .and_then(|exe_path| exe_path.parent().map(|p| p.join("note")));
+        let cur_note_dir = std::env::current_dir().ok().map(|p| p.join("note"));
 
-        if std::fs::metadata(self.work_dir.clone()).is_err(){
-            let _= std::fs::create_dir(self.work_dir.clone());
-        }
+        self.work_dir = if let Some(dir) = exe_note_dir.clone().filter(|dir| dir.exists()) {
+            dir
+        } else if let Some(dir) = cur_note_dir.clone().filter(|dir| dir.exists()) {
+            dir
+        } else if let Some(dir) = exe_note_dir {
+            let _ = fs::create_dir_all(&dir);
+            dir
+        } else {
+            let dir = cur_note_dir.unwrap_or_else(|| PathBuf::from("./note"));
+            let _ = fs::create_dir_all(&dir);
+            dir
+        };
 
-        if std::fs::metadata(self.image_path()).is_err(){
-            let _= std::fs::create_dir(self.image_path());
-        }
+        let _ = fs::create_dir_all(&self.work_dir);
+        let _ = fs::create_dir_all(self.image_path());
     }
 
     //return links of the file
-    fn get_file_links(&mut self, content: &str) -> Vec<String> {
-        let mut cfg = EditCfg::new(17.0, true, None);
+    fn get_file_links(&mut self, content: &str) -> HashMap<String, ()> {
+        let mut cfg = EditCfg::new(17.0, true, None, HeightMode::fix_max());
         let markdown = MarkDownImpl::new_simple(content, &mut cfg);
         return markdown.markdown_get_links();
     }
@@ -520,7 +691,7 @@ impl NoteSpace {
     fn set_link_parents(&mut self) {
         let mut map: HashMap<String, Vec<String>> = HashMap::new();
         for (file, cache) in &self.file_cache {
-            for link in &cache.links {
+            for link in cache.links.keys() {
                 if let Some(parents) = map.get_mut(link) {
                     if !parents.contains(file) {
                         parents.push(file.to_string());
@@ -644,7 +815,9 @@ impl NoteSpace {
 
     pub fn get_child_links(&self, name: &str) -> Vec<String> {
         if let Some(cache) = self.file_cache.get(name) {
-            return cache.links.clone();
+            let mut links: Vec<String> = cache.links.keys().cloned().collect();
+            links.sort();
+            return links;
         } else if name == "." {
             return self.get_root_files();
         }
@@ -690,6 +863,7 @@ impl NoteSpace {
 
     pub fn read_note(&self, name: &str) -> std::io::Result<String> {
         let path = self.name2path(name);
+        // Notes use UTF-8 encoding, can read directly
         std::fs::read_to_string(path)
     }
 

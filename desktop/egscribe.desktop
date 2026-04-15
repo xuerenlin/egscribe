@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=EgScribe
+Comment=Custom EgScribe Application
+Exec="/home/linxr/project/rsspace/egscribe/release/egscribe" %F
+Path=/home/linxr/project/rsspace/egscribe/release
+Icon=/home/linxr/project/rsspace/egscribe/release/egscribe.png
+Terminal=false
+Type=Application
+Categories=Utility;TextEditor;
+MimeType=text/plain;

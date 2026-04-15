@@ -2,18 +2,27 @@
 #![allow(rustdoc::missing_crate_level_docs)] // it's an example
 
 mod sitter;
+mod ime_win_bridge;
 mod util;
+mod uicom;
 mod medit;
 mod toolbar;
 mod space;
-mod mem;
+mod store;
 mod find;
+mod config;
+mod i18n;
+mod plugin;
+mod sidepanel;
 
 use std::vec;
-use toolbar::{ToolBar, ToolBarType};
-use mem::Store;
+use toolbar::{ToolBar, PathBar, WinBar, FileStatusBar, TabButtonBar};
+use store::Store;
 use eframe::egui::{self, Color32, Stroke, Vec2};
-use eframe::egui::{Order, Rect, EventFilter, Ui, Event, Key, ScrollArea};
+use eframe::egui::{Order, Rect, EventFilter, Ui, Event, Key};
+use std::sync::mpsc;
+use util::start_process;
+use sidepanel::SidePanel;
 
 fn main() -> Result<(), eframe::Error> {
     let args: Vec<String> = std::env::args().collect();
@@ -21,9 +30,14 @@ fn main() -> Result<(), eframe::Error> {
     if args.len() > 1 {
         file = args[1].clone();
     }
+    let rx = start_process(&file);
+    if rx.is_none() {
+        println!("other process has started, exit now !");
+        std::process::exit(0);
+    }
 
     env_logger::init(); // Log to stderr (if you run with `RUST_LOG=debug` or $env:RUST_LOG="debug" in windows).
-    let icon = eframe::icon_data::from_png_bytes(&include_bytes!("../fonts/egscribe.png")[..]).unwrap();
+    let icon = eframe::icon_data::from_png_bytes(&include_bytes!("../desktop/egscribe.png")[..]).unwrap();
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_icon(icon)
@@ -35,7 +49,7 @@ fn main() -> Result<(), eframe::Error> {
         options,
         Box::new(|cc| {
             egui_extras::install_image_loaders(&cc.egui_ctx);
-            Ok(Box::new(MyApp::new(cc, file)))
+            Ok(Box::new(MyApp::new(cc, file, rx)))
         }),
     )
 }
@@ -43,27 +57,59 @@ fn main() -> Result<(), eframe::Error> {
 struct MyApp {
     store: Store,
     dropped_files: Vec<egui::DroppedFile>,
-    title: String
+    title: String,
+    ipc_rx: Option<mpsc::Receiver<String>>,
+    side_panel: SidePanel,
+    #[cfg(windows)]
+    last_tsf_seq: u64,
 }
 
 impl MyApp {
-    fn new(cc: &eframe::CreationContext<'_>, file: String) -> Self {
+    fn new(cc: &eframe::CreationContext<'_>, file: String, ipc_rx: Option<mpsc::Receiver<String>>) -> Self {
         load_fonts(&cc.egui_ctx);
-        Self::default(file)
-    }
-
-    fn default(file: String) -> Self {
         let mut store = Store::default();
         if !file.is_empty() {
             let _ = store.open_file(&file);
         }
+        #[cfg(windows)]
+        {
+            let ok = crate::ime_win_bridge::tsf_win::install_tsf_monitor();
+            log::info!("install tsf monitor: ok={}", ok);
+        }
+
         Self {
             store,
             dropped_files: vec![],
-            title: String::new()
+            title: String::new(),
+            ipc_rx,
+            side_panel: SidePanel::new(),
+            #[cfg(windows)]
+            last_tsf_seq: 0,
         }
     }
 
+    #[cfg(windows)]
+    fn trace_tsf_state(&mut self) {
+        if let Some(snapshot) = crate::ime_win_bridge::tsf_win::poll_tsf_snapshot() {
+            if snapshot.seq != self.last_tsf_seq {
+                self.last_tsf_seq = snapshot.seq;
+                log::debug!(
+                    "tsf-msg composing={} start={} update={} end={} bound={} ui_open={} ui_begin={} ui_update={} ui_end={} comp_sink_supported={} seq={}",
+                    snapshot.composing,
+                    snapshot.start_count,
+                    snapshot.update_count,
+                    snapshot.end_count,
+                    snapshot.context_bound,
+                    snapshot.ui_open,
+                    snapshot.ui_begin_count,
+                    snapshot.ui_update_count,
+                    snapshot.ui_end_count,
+                    snapshot.composition_sink_supported,
+                    snapshot.seq
+                );
+            }
+        }
+    }
         
     fn hot_keys(&mut self, ui: &Ui) {
         //hot keys
@@ -116,7 +162,7 @@ impl MyApp {
         };
 
         let mut a = true;
-        egui::Window::new("title")
+        egui::Window::new(i18n::tr("window.edit.title"))
             .fixed_rect(in_rect)
             .constrain_to(out_rect)
             .open(&mut a)
@@ -125,9 +171,11 @@ impl MyApp {
             .order(Order::Middle)
             .frame(win_frame)
             .show(ctx, |ui| {
+                TabButtonBar::from_note_and_file_tabs(ui, &mut self.store);
                 if let Some(cur_path) = self.store.note_space.get_current_path() {
-                    let path_bar = ToolBarType::PathBar(cur_path);
-                    ui.add(ToolBar::new(&mut self.store, path_bar));
+                    ui.horizontal(|ui|{
+                        ui.add(PathBar::new(&mut self.store, cur_path));
+                    });
                 }
 
                 if let Some((_uni_file,edit_ctx)) = self.store.cur_edit_ctx_mut() {
@@ -138,10 +186,22 @@ impl MyApp {
 
     pub fn update_title(&mut self, ctx: &egui::Context) {
         if let Some(cur_name) = self.store.note_space.get_current_name() {
-            let title = "egscribe - ".to_string() + &cur_name;
+            let title_prefix = i18n::tr("window.main.title_prefix");
+            let title = format!("{title_prefix}{cur_name}");
             if title != self.title {
                 self.title = title.clone();
                 ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
+            }
+        }
+    }
+
+    fn open_file_command_from_ipc_rx(&mut self, ctx: &egui::Context) {
+        if let Some(rx) = &self.ipc_rx {
+            while let Ok(file) = rx.try_recv() {
+                if !file.is_empty() {
+                    let _ = self.store.open_file(&file);
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+                }
             }
         }
     }
@@ -170,59 +230,54 @@ impl MyApp {
     }
 }
 
-//这是什么字体
+// What font is this
 impl eframe::App for MyApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.update_title(ctx);
+        #[cfg(windows)]
+        crate::ime_win_bridge::tsf_win::ensure_tsf_context_bound();
+        //#[cfg(windows)]
+        //self.trace_tsf_state();
 
+        self.update_title(ctx);
+        self.open_file_command_from_ipc_rx(ctx);
+
+        
         egui::TopBottomPanel::top("top")
             .show_separator_line(true)
             .show(ctx, |ui| {
-            ui.add(ToolBar::new(&mut self.store, ToolBarType::ToolBar));
+                ui.horizontal(|ui|{
+                    ui.add(ToolBar::new(&mut self.store));
+                    //TabButtonBar::from_note_and_file_tabs(ui, &mut self.store);
+                });
+        });
+        
+        egui::TopBottomPanel::bottom("bottom").show(ctx, |ui|{
+            if let Some(_) = self.store.note_space.get_current_path() {
+                ui.horizontal(|ui|{
+                    ui.add(FileStatusBar::new(&mut self.store));
+                });
+            }
         });
 
-        //egui::TopBottomPanel::bottom("bottom").show(ctx, |ui|{
-        //    ui.horizontal(|ui| {
-        //        ui.label("status bar");
-        //    });
-        //});
-
-        //index window
-        if self.store.note_space.is_show_index_window() {
-            egui::SidePanel::left("options")
-                .resizable(true)
-                .default_width(260.0)
-                .show_separator_line(true)
-                .show(ctx, |ui| {
-
-                ScrollArea::both().auto_shrink(false).show(ui, |ui| {
-                    let mut outer_rect = ui.cursor();
-
-                    outer_rect.set_width(ui.available_width());
-                    outer_rect.set_height(ui.available_height());
-                    let in_rect = outer_rect.expand(-10.0);
-                    let mut config = self.store.config.clone();
-                    if let Some(cmd) = self.store.note_space.show_index_view(&mut config, ui, in_rect, outer_rect) {
-                        self.store.execute_cmd(cmd);
-                    }
-                    //save tree state
-                    if config.tree_open_state_changed {
-                        self.store.config = config;
-                        self.store.config_save();
-                    }
-                });
-            });
-        }
+        // 侧边栏（包含笔记管理和插件管理）
+        self.side_panel.show(&mut self.store, ctx);
 
         if self.store.tool_bar_info.is_show_bottom {
             egui::TopBottomPanel::bottom("bottom_find_result")
                 .resizable(true)
                 .default_height(360.0)
                 .show(ctx, |ui|{
-                    let file_path = if let Some(unifile) = &self.store.find_window.find_file { unifile.path() } else {String::new()};
-                    let title = format!("Find result: match {} items in {}", 
-                        self.store.find_window.edit_ctx.line_num(), file_path);
-                    ui.add(ToolBar::new(&mut self.store, ToolBarType::WinBar(title)));
+                    let file_path = if let Some(unifile) = &self.store.find_window.find_file {
+                        unifile.path()
+                    } else {
+                        String::new()
+                    };
+                    let count = self.store.find_window.edit_ctx.line_num();
+                    let template = i18n::tr("window.find_result.title");
+                    let title = template
+                        .replace("{count}", &format!("{count}"))
+                        .replace("{file}", &file_path);
+                    ui.add(WinBar::new(&mut self.store, title));
                     ui.add(crate::medit::Edit::new(&mut self.store.find_window.edit_ctx));
                     self.exe_find_edit_cmd();
             });
@@ -231,7 +286,6 @@ impl eframe::App for MyApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             //test_clipboard(ui);
             //ui.image("file://E:/rustspace/medit/fonts/M.png");
-            
             let mut outer_rect = ui.cursor();
             outer_rect.set_width(ui.available_width());
             outer_rect.set_height(ui.available_height());
@@ -249,7 +303,7 @@ impl eframe::App for MyApp {
                 }
             }
 
-            //find window as top window 
+            //find window 
             if let Some(find) = self.store.find_window.show(ui) {
                 self.store.execute_find(find);
             }
@@ -270,6 +324,7 @@ impl eframe::App for MyApp {
         
         // preview files dropped
         preview_files_being_dropped(ctx);
+        show_non_text_file_prompt(ctx, &mut self.store);
 
         // Collect dropped files:
         ctx.input(|i| {
@@ -280,8 +335,15 @@ impl eframe::App for MyApp {
 
         // process edit command
         self.exe_edit_cmd();
+        
+        // Handle plugin messages and commands
+        self.store.handle_plugin_messages();
+        
+        // Check and perform auto-save for notes
+        self.store.check_auto_save();
 
     }
+
 }
 
 /// Preview hovering files:
@@ -307,7 +369,7 @@ fn preview_files_being_dropped(ctx: &egui::Context) {
         let painter =
             ctx.layer_painter(LayerId::new(Order::Foreground, Id::new("file_drop_target")));
 
-        let screen_rect = ctx.screen_rect();
+        let screen_rect = ctx.content_rect();
         painter.rect_filled(screen_rect, 0.0, Color32::from_black_alpha(192));
         painter.text(
             screen_rect.center(),
@@ -317,6 +379,35 @@ fn preview_files_being_dropped(ctx: &egui::Context) {
             Color32::WHITE,
         );
     }
+}
+
+fn show_non_text_file_prompt(ctx: &egui::Context, store: &mut Store) {
+    use egui::*;
+
+    let Some(prompt) = store.pending_non_text_file_prompt().cloned() else {
+        return;
+    };
+    Window::new("无法直接打开文件")
+        .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
+        .collapsible(false)
+        .resizable(true)
+        .movable(true)
+        .min_size([400.0, 100.0])
+        .order(Order::Foreground)
+        .show(ctx, |ui| {
+            ui.label(format!("文件：{}", prompt.file_path));
+            ui.add_space(8.0);
+            ui.colored_label(Color32::from_rgb(255, 120, 120), &prompt.reason);
+            ui.add_space(12.0);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
+                if ui.button("关闭").clicked() {
+                    store.dismiss_non_text_file_prompt();
+                }
+                if ui.button("调用插件读取文件").clicked() {
+                    store.request_read_non_text_with_plugin();
+                }
+            });
+        });
 }
 
 

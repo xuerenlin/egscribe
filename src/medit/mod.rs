@@ -3,28 +3,28 @@
 
 const TEXT_TOP_SPACE: f32 = 1.0;
 const TEXT_BOTTOM_SPACE: f32 = 1.0;
-const REPL_SPACE_LINE: &str = "{{SPACE_LINE}}";
 
 pub mod ctx;
-pub mod icon;
-pub mod items;
+pub mod cfg;
 pub mod layout;
 pub mod md;
 pub mod pgh;
-pub mod text;
 pub mod undo;
-pub mod cmd;
 pub mod cursor;
 pub mod image;
+pub mod ctxmenu;
+pub mod action;
+pub mod outline;
+pub mod scroll_layout;
 
 pub use ctx::Ctx;
-pub use items::PghCheckBox;
 pub use layout::Edit;
 pub use md::{LinkInfo, MarkDownImpl, UrlInfo};
 pub use cursor::Cursor;
-pub use pgh::{CharRect, PghItem, SegmentType, PghType, PghView, TableInfo};
-pub use text::PghText;
-pub use undo::{DoItem, DoCmd, DoMngr};
-pub use icon::IconName;
-pub use cmd::{FindCmd, FindReplaceCtx, Command};
+#[allow(unused_imports)] // 对外 re-export，供 `crate::medit::PghCheckBox` 使用
+pub use pgh::PghCheckBox;
+pub use pgh::{CharRect, CodeInfo, PghText, SegmentType, PghType, PghView, TableInfo, TextSpacing};
+pub use undo::{DoItem, DoCmd, DoMngr, MergeRedoAndUndoGuard};
+pub use action::{Action, FindCmd, FindReplaceCtx, Trigger};
 pub use image::ImageInfo;
+pub use outline::{MarkdownOutline, TocCache, TocEntry, TocNode, toc_entries_to_forest};

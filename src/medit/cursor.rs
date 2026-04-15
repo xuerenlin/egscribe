@@ -83,7 +83,7 @@ impl Cursor {
         } else if cursor.segment > 0 {
             cursor.segment -= 1;
             cursor.culumn = pgh_view.max_culumn(&cursor);
-            if cursor.culumn > 0 && !pgh_view.is_code() {
+            if cursor.culumn > 0 && !pgh_view.is_code_row() {
                 cursor.culumn -= 1;
             }
         } else if cursor.line_no > 0 {

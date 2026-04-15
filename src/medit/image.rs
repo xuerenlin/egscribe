@@ -1,5 +1,5 @@
 
-use eframe::egui::{ColorImage, Color32};
+use eframe::egui::{ColorImage, Color32, Vec2};
 use arboard::Clipboard;
 use image::{ImageBuffer, ImageResult, RgbaImage};
 
@@ -7,7 +7,8 @@ use image::{ImageBuffer, ImageResult, RgbaImage};
 pub struct ImageInfo {
     pub alt: String,
     pub url: String,
-    pub img: Option<ColorImage>
+    pub img: Option<ColorImage>,
+    pub url_range: Option<(usize, usize)>, // (start_char_offset, end_char_offset) in original text
 }
 
 impl ImageInfo {
@@ -22,6 +23,7 @@ impl ImageInfo {
             let color_image =  ColorImage {
                     size: [image_data.width, image_data.height],
                     pixels,
+                    source_size: Vec2::new(image_data.width as f32, image_data.height as f32),
                 };
 
             //save to file
@@ -32,7 +34,8 @@ impl ImageInfo {
             let image_info = ImageInfo {
                 alt,
                 url,
-                img: Some(color_image)
+                img: Some(color_image),
+                url_range: None,
             };
             return Some(image_info);
         }
@@ -71,7 +74,7 @@ fn test_clipboard(ui: &mut Ui) {
         //println!("Image data is:\n{:?}", image_data.bytes);
         let pixels: Vec<_> = image_data
             .bytes
-            .chunks_exact(4)  // 假设是 RGBA 格式（4字节/像素）
+            .chunks_exact(4)  // Assume RGBA format (4 bytes per pixel)
             .map(|p| egui::Color32::from_rgba_unmultiplied(p[0], p[1], p[2], p[3]))
             .collect();
 

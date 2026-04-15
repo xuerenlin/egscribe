@@ -1,7 +1,8 @@
 
 use eframe::egui::{Button, Event, EventFilter, Key, Order, Rect, ScrollArea, TextEdit, Ui, Vec2, Widget, Window};
-use crate::medit::{ctx::FindCache, Ctx, FindCmd, FindReplaceCtx};
+use crate::medit::{ctx::FindCache, Ctx, FindCmd, FindReplaceCtx, cfg::HeightMode};
 use crate::space::UniFile;
+use crate::i18n::tr;
 
 pub struct FindWindow {
     is_show: bool,
@@ -16,8 +17,10 @@ pub struct FindWindow {
 
 impl FindWindow {
     pub fn new() -> Self {
-        let mut edit_ctx = Ctx::new("", false, None);
-        edit_ctx.cfg_mut().need_line_click_cmd = true;
+        let edit_ctx = Ctx::new()
+            .with_text("", false)
+            .height_mode(HeightMode::fix_max())
+            .need_line_click_cmd(true);
         Self {
             is_show: false,
             is_window: true,
@@ -61,10 +64,20 @@ impl FindWindow {
             .collect::<Vec<_>>()
             .join("\n");
 
-        self.edit_ctx = Ctx::new(&text, false, None);
-        self.edit_ctx.cfg_mut().need_line_click_cmd = true;
-        self.edit_ctx.cfg_mut().hightlight_seleted_word = false;
+        println!("set_find_result: text length = {}, cache count = {}", text.len(), result.cache.len());
+        
+        self.edit_ctx = Ctx::new()
+            .with_text(&text, false)
+            .height_mode(HeightMode::fix_max())
+            .need_line_click_cmd(true)
+            .hightlight_seleted_word(false);
         self.edit_ctx.cfg_mut().dark_mode = dark_mode;
+        
+        // Directly set find cache and parameters instead of re-searching
+        // This allows FindNotes results to be cached correctly
+        self.edit_ctx.set_find_cache(result.clone(), find_param.clone());
+        
+        // Also set same_cache for highlighting
         self.edit_ctx.flash_same_cache_with_param(find_param);
         self.find_file = Some(find_file);
     }
@@ -88,16 +101,22 @@ impl FindWindow {
             }
 
             ui.separator();
-            if ui.button("find").clicked() {
+            if ui.button(tr("find.button")).clicked() {
                 self.replace_ready =  true;
                 let mut ctx: FindReplaceCtx = self.param.clone();
                 ctx.cmd = Some(FindCmd::Find);
                 param = Some(ctx)
             }
 
-            if ui.button("find all").clicked() {
+            if ui.button(tr("find.all")).clicked() {
                 let mut ctx: FindReplaceCtx = self.param.clone();
                 ctx.cmd = Some(FindCmd::FindAll);
+                param = Some(ctx)
+            }
+
+            if ui.button(tr("find.notes")).clicked() {
+                let mut ctx: FindReplaceCtx = self.param.clone();
+                ctx.cmd = Some(FindCmd::FindNotes);
                 param = Some(ctx)
             }
 
@@ -109,7 +128,7 @@ impl FindWindow {
             }
 
             if self.is_open_replace {
-                if ui.button("replace").clicked() {
+                if ui.button(tr("find.replace")).clicked() {
                     let mut ctx: FindReplaceCtx = self.param.clone();
                     if self.replace_ready {
                         ctx.cmd = Some(FindCmd::Replace);
@@ -119,7 +138,7 @@ impl FindWindow {
                     }
                     param = Some(ctx)
                 }
-                if ui.button("replace all").clicked() {
+                if ui.button(tr("find.replace_all")).clicked() {
                     let mut ctx: FindReplaceCtx = self.param.clone();
                     ctx.cmd = Some(FindCmd::ReplaceAll);
                     param = Some(ctx)
@@ -134,7 +153,7 @@ impl FindWindow {
         ui.horizontal(|ui|{
             //ui.label("F");
             let mut edit = TextEdit::singleline(&mut self.param.find)
-                .hint_text("find")
+                .hint_text(tr("find.hint"))
                 .desired_width(max_width);
             if self.need_focus {
                 edit = edit.cursor_at_end(true);
@@ -150,7 +169,7 @@ impl FindWindow {
             ui.horizontal(|ui|{
                 //ui.label("R");
                 let edit = TextEdit::singleline(&mut self.param.replace)
-                    .hint_text("replace")
+                    .hint_text(tr("find.replace.hint"))
                     .desired_width(max_width);
                 edit.ui(ui);
             });
@@ -194,7 +213,7 @@ impl FindWindow {
         if let Some(pointer_pos) = ui.ctx().pointer_interact_pos() {
             rect = rect.translate(Vec2::new(pointer_pos.x, pointer_pos.y));
         }
-        let title = format!("find/replace");
+        let title = tr("find.title");
         let egui_ctx = ui.ctx();
         let mut is_show = self.is_show;
         Window::new(title)

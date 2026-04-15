@@ -1,0 +1,25 @@
+{
+  "id": "simple_py",
+  "name": {
+    "zh-CN": "简单插件示例 (Python)",
+    "en-US": "Simple Plugin Example (Python)"
+  },
+  "description": {
+    "zh-CN": "这是一个使用 Python 编写的简单插件示例，演示了插件系统的基本功能，包括命令执行、事件通知等。",
+    "en-US": "This is a simple plugin example written in Python that demonstrates the basic functionality of the plugin system, including command execution, event notifications, etc."
+  },
+  "exe_path": "python3",
+  "args": [
+    "main.py"
+  ],
+  "config": {
+    "greeting": "Hello from Python plugin!"
+  },
+  "enabled": true,
+  "auto_start": true,
+  "triggers": [
+    "line_changed",
+    "file_opened"
+  ]
+}
+

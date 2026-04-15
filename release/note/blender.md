@@ -1,3 +1,0 @@
-{{SPACE_LINE}}
-
-[[basic]]

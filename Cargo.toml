@@ -1,23 +1,31 @@
+[workspace]
+members = [
+    ".",
+    "plugins/plugin_sdk",
+    "plugins/simple",
+    "plugins/cal",
+    "plugins/xlsx2md",
+]
+resolver = "2"
+
 [package]
 name = "egscribe"
 version = "0.1.0"
+default-run = "egscribe"
 authors = ["Linxr <linxr.2005@163.com>"]
 license = "MIT"
 edition = "2021"
 rust-version = "1.76"
 publish = false
 
-
 [dependencies]
-#
-# 29.01 disable Ime Event in linux, so we use 28.01
-#
-eframe = { version = "0.31.1",  features = [
+
+eframe = { version = "0.33.2",  features = [
     "default",
     "__screenshot", # __screenshot is so we can dump a screenshot using EFRAME_SCREENSHOT_TO
 ] }
 
-egui_extras = { version = "0.31.1",  features = [ "default", "all_loaders"]}
+egui_extras = { version = "0.33.2",  features = [ "default", "all_loaders"]}
 log = { version = "0.4", features = ["std"] }
 env_logger = "0.10"
 dyn-clone = "1.0.17"
@@ -30,12 +38,22 @@ image = "0.25.6"
 uuid = { version = "1.7", features = ["v7"] }
 rust-crypto = "0.2.36"
 base64 = "0.21"
+interprocess = "1.1"
+encoding_rs = "0.8"
+chardetng = "0.1"
+rfd = "0.14"
+chrono = "0.4"
+raw-window-handle = "0.6"
 
-#windows = { version = "0.54", features = [
-#    "Win32_UI_Input_Ime",
-#    "Win32_UI_WindowsAndMessaging",
-#    "Win32_Globalization",
-#] }
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.54", features = [
+    "implement",
+    "Win32_System_Com",
+    "Win32_UI_Input_Ime",
+    "Win32_UI_TextServices",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_Globalization",
+] }
 
 # 
 # tree-sitter
@@ -48,4 +66,33 @@ tree-sitter-rust = "0.20.4"
 tree-sitter-go = "0.20.0"
 tree-sitter-bash = "0.20.5"
 tree-sitter-json = "0.20.2"
+tree-sitter-python = "0.20.4"
+tree-sitter-java = "0.20.2"
+tree-sitter-cpp = "0.20.3"
+tree-sitter-php = "0.20.0"
+tree-sitter-ruby = "0.20.0" 
+tree-sitter-scala = "0.20.*"
+tree-sitter-typescript = "0.20.5"
+tree-sitter-html = "0.19.0"
+# tree-sitter-css = "0.19.0"
+tree-sitter-toml = "0.20.0"
+tree-sitter-ocaml = "0.20.0"
+
+# tree-sitter-md = "0.3.2"
+# tree-sitter-yaml = "0.7.0"
+# tree-sitter-lua = "0.20.*"
+# tree-sitter-kotlin = "0.3.8"
+# tree-sitter-swift = "0.20.*"
+# tree-sitter-dart = "0.20.*"
+# tree-sitter-elixir = "0.20.*"
+# tree-sitter-clojure = "0.20.*" 
+# tree-sitter-haskell = "0.20.*"
+# tree-sitter-fsharp = "0.20.*"
+# tree-sitter-nim = "0.20.*"
+# tree-sitter-zig = "0.20.*"
+# tree-sitter-v = "0.20.*"
+
+[dev-dependencies]
+egui = "0.33.2"
+serde_json = "1.0"
 
