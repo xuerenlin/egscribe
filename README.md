@@ -1,245 +1,245 @@
-# egscribe 帮助文档
+# egscribe Help
 
-egscribe 是一个本地优先的 Markdown 笔记与轻量文本编辑器。  
-核心思路是：**用 `note` 目录管理笔记**，同时也能打开任意外部纯文本文件。
+egscribe is a local-first Markdown note-taking app and lightweight text editor.  
+The core idea is: **manage notes in the `note` directory**, while still being able to open external plain text files.
 
 ![screenshot](https://gitee.com/linxueren_0/egscribe/raw/master/screenshot.png)
 
 ---
 
-## 快速开始
+## Quick Start
 
-1. 启动程序后，会自动创建：
-   - `note/`：笔记目录
-   - `note/images/`：粘贴图片保存目录
-   - `note/config.json`：配置文件
-2. 在左侧「笔记」页新建笔记，默认保存为 `note/<名称>.md`。
-3. 使用 `Ctrl+S` 保存；如果开启自动保存，会按配置间隔自动写盘。
+1. After launch, the app automatically creates:
+   - `note/`: notes directory
+   - `note/images/`: pasted image storage directory
+   - `note/config.json`: configuration file
+2. Create a new note in the left **Notes** panel. It is saved as `note/<name>.md` by default.
+3. Press `Ctrl+S` to save. If auto-save is enabled, data is saved at the configured interval.
 
->建议第一次使用先打开本文件，边看边操作一遍。
-
----
-
-## 界面说明
-
-### 顶部工具栏
-- 界面语言切换（中文 / English）
-- 主题切换（浅色 / 深色）
-- 文字亮度调节
-- 字号设置
-- 行号开关
-- 表格样式（全边框 / 仅横线 / 无边框）
-- 表格行号列开关
-- Markdown 标题多级序号开关
-- 自动换行开关
-- 缩进增减
-- 新建文件
-
-### 左侧边栏
-
-左侧有三个页签：
-
-- **笔记**：新建、重命名、删除、刷新、固定常用笔记
-- **目录**：显示当前 Markdown 文档标题结构，点击可跳转
-- **插件**：查看插件状态、启动/停止插件、查看日志
-
-`Esc` 可快速显示/隐藏侧栏。
-
-### 中间编辑区
-
-- 支持多标签（笔记和外部文件分开管理）
-- 支持拖放文件到窗口打开
-- 顶部路径条可辅助切换相关笔记/文件
-
-### 底部状态栏
-
-- 显示当前是「笔记」还是「文件」
-- 可切换语法高亮语言（含 Plain Text）
-- 可查看选区信息
-- 可设置换行符（CRLF/LF 等）并保存
-- 可按指定编码重新打开或保存文件
+> For first-time use, open this file and follow along while trying each feature.
 
 ---
 
-## 常用快捷键
+## Interface Overview
 
-|快捷键|作用|
-|--|--|
-|`Ctrl+S`|保存当前文档|
-|`Ctrl+F`|打开查找/替换窗口（会尝试带入选中文本）|
-|`Ctrl+Z` / `Ctrl+Y`|撤销 / 重做|
-|`Ctrl+A`|全选|
-|`Ctrl+Enter`|从表格或代码块末尾跳出，继续普通段落|
-|`Esc`|显示/隐藏左侧边栏|
-|更多|查看右键菜单中对应的快捷键|
+### Top Toolbar
+- UI language switch (Chinese / English)
+- Theme switch (Light / Dark)
+- Text brightness
+- Font size
+- Line number toggle
+- Table style (Full border / Horizontal only / No border)
+- Table row index column toggle
+- Markdown heading section number toggle
+- Wrap text toggle
+- Indent decrease/increase
+- New file
 
-**右键菜单支持常见 Markdown 插入**：标题、加粗、斜体、删除线、链接、行内代码、列表、TODO、引用、表格、代码块、水平线等。
+### Left Side Panel
 
----
+There are three tabs on the left:
 
-## 笔记系统与双链
+- **Notes**: create, rename, delete, refresh, and pin frequently used notes
+- **Outline**: show headings of the current Markdown document and click to jump
+- **Plugins**: view plugin status, start/stop plugins, and view logs
 
-### 笔记与文件的区别
+Use `Esc` to quickly show/hide the side panel.
 
-- **笔记**：位于 `note/*.md`，按笔记名管理
-- **文件**：外部路径打开的普通文本文件
+### Center Editor Area
 
-### 双链语法
+- Supports multiple tabs (notes and external files are managed separately)
+- Supports drag-and-drop file opening
+- Top path bar helps switch between related notes/files
 
-使用 [[双链子文件]] 建立笔记间链接（不带 `.md` 后缀），点击链接图标可以自动创建文件并跳转。  
-双链会参与笔记关系索引，便于在知识库中导航。
+### Bottom Status Bar
 
-### 固定常用笔记
-
-常用笔记可以固定，方便在标签区快速访问。
-
----
-
-## 查找与替换
-
-查找窗口支持：
-- 当前文档查找
-- 当前文档查找全部
-- 替换 / 全部替换
-- 跨笔记查找（查找笔记）
-- 区分大小写 / 全词匹配 / 正则表达式
-
-查找结果可在结果面板中点击跳转。
+- Shows whether the current tab is a **Note** or **File**
+- Syntax highlight language switch (including Plain Text)
+- Selection info display
+- Line ending settings (CRLF/LF, etc.) and save
+- Reopen or save with a specified encoding
 
 ---
 
-## Markdown 编辑特性
+## Common Shortcuts
 
-下面的示例都可以直接复制到编辑区测试。
+| Shortcut | Action |
+| -- | -- |
+| `Ctrl+S` | Save current document |
+| `Ctrl+F` | Open find/replace window (tries to preload selected text) |
+| `Ctrl+Z` / `Ctrl+Y` | Undo / Redo |
+| `Ctrl+A` | Select all |
+| `Ctrl+Enter` | Exit table/code block and continue normal paragraph |
+| `Esc` | Show/Hide left side panel |
+| More | Check corresponding shortcuts in the context menu |
 
-### 正文格式
-这是普通文本。
-这是 **加粗** 文本。
-这是 *斜体* 文本。
-这是 ~~删除线~~ 文本。
-这是 `行内代码`。
-
-### 列表（无序 / 有序 / TODO）
-- 无序项 A
-- 无序项 B
-    - 子项 B.1
-    - 子项 B.2
-
-1. 有序项 1
-2. 有序项 2
-
-- [ ] 待办事项
-- [x] 已完成事项
-- [x] 已完成事项
-
-### 引用、分割线、链接、图片
-
->这是引用块
-> 第二行引用
+**The context menu supports common Markdown insertions**: headings, bold, italic, strikethrough, links, inline code, lists, TODO, quote, table, code block, horizontal rule, etc.
 
 ---
-[egscribe 项目地址 gitee](https://gitee.com/linxueren_0/egscribe)
 
-[egscribe 项目地址 github](https://example.com)
+## Notes and Wiki Links
 
-![示例图片](image_019d9074-2c69-7282-9a0b-2f9faa6c3edc.png)
+### Difference Between Notes and Files
 
-说明：
-- 外链可通过链接图标调用系统浏览器打开。
-- 粘贴图片（`Ctrl+V`）会自动写入 `note/images/` 并插入图片语法。
+- **Note**: stored under `note/*.md`, managed by note name
+- **File**: external plain text file opened by path
 
-### 双链笔记
+### Wiki Link Syntax
 
-示例：
-- 今天整理了 Rust 学习笔记，关联 [[每日记录]] 和 [[开发计划]]。
+Use `[[WikiLinkedNote]]` to create links between notes (without `.md` suffix). Click the link icon to auto-create and jump to the target note.  
+Wiki links are indexed in note relationships, making navigation easier in your knowledge base.
 
-说明：
-- 双链语法为 `[[笔记名]]`，不带 `.md` 后缀。
-- 可用于构建笔记之间的导航关系。
+### Pin Frequently Used Notes
 
-### 表格
+You can pin commonly used notes for quick access in the tab area.
 
-基础表格示例：
-|功能|快捷键|说明|
-|--|--|--|
-|保存|Ctrl+S|保存当前文档|
-|查找|Ctrl+F|打开查找/替换|
-|侧栏|Esc|显示/隐藏侧栏|
+---
 
-表格编辑说明：
-- 识别为表格后可进行可视化编辑（插入/删除行列）。
-- 工具栏支持切换边框样式（全边框 / 仅横线 / 无边框）。
-- 可开关表格行号列。
-- 在表格内回车通常继续表格编辑；要跳出到普通正文请用 `Ctrl+Enter`。
+## Find and Replace
 
-### 代码块
+The find window supports:
+- Find in current document
+- Find all in current document
+- Replace / Replace all
+- Search across notes
+- Case-sensitive / Whole-word / Regex
 
-普通围栏代码块：
+You can click results in the result panel to jump directly.
+
+---
+
+## Markdown Editing Features
+
+You can copy the examples below directly into the editor.
+
+### Text Formatting
+This is plain text.  
+This is **bold** text.  
+This is *italic* text.  
+This is ~~strikethrough~~ text.  
+This is `inline code`.
+
+### Lists (Unordered / Ordered / TODO)
+- Unordered item A
+- Unordered item B
+    - Sub item B.1
+    - Sub item B.2
+
+1. Ordered item 1
+2. Ordered item 2
+
+- [ ] TODO item
+- [x] Done item
+- [x] Done item
+
+### Quote, Horizontal Rule, Link, Image
+
+> This is a quote block
+> Second quote line
+
+---
+[egscribe Project on Gitee](https://gitee.com/linxueren_0/egscribe)
+
+[egscribe Project on GitHub](https://github.com/xuerenlin/egscribe)
+
+![Sample Image](image_019d9074-2c69-7282-9a0b-2f9faa6c3edc.png)
+
+Notes:
+- External links can be opened with the link icon in your system browser.
+- Pasting an image (`Ctrl+V`) writes it into `note/images/` and inserts image syntax automatically.
+
+### Wiki Link Notes
+
+Example:
+- Today I organized Rust study notes and linked [[Daily Notes]] and [[Development Plan]].
+
+Notes:
+- Wiki link syntax is `[[NoteName]]` without `.md`.
+- Useful for building a navigable knowledge graph.
+
+### Tables
+
+Basic table example:
+| Feature | Shortcut | Description |
+| -- | -- | -- |
+| Save | Ctrl+S | Save current document |
+| Find | Ctrl+F | Open find/replace |
+| Side panel | Esc | Show/Hide side panel |
+
+Table editing notes:
+- Once recognized as a table, visual editing is available (insert/delete rows and columns).
+- Toolbar supports border style switching (full / horizontal only / none).
+- Table row index column can be toggled.
+- Pressing Enter usually continues editing inside the table. Use `Ctrl+Enter` to continue normal paragraph text.
+
+### Code Blocks
+
+Plain fenced code block:
 ```text
-这是一段纯文本代码块
-第二行
+This is a plain text code block
+Second line
 ```
 
-Rust 示例（语法高亮）：
+Rust example (syntax highlight):
 ```rust
 fn main() {
     println!("Hello, egscribe!");
 }
 ```
 
-Python 示例：
+Python example:
 ```python
 def add(a, b):
     return a + b
 ```
 
-说明：
-- 围栏代码块格式为：三个反引号 + 语言名 + 内容 + 三个反引号。
-- 在代码块内按回车会继续在块内编辑；要回到正文请用 `Ctrl+Enter`。
+Notes:
+- Fenced code block format: triple backticks + language + content + triple backticks.
+- Pressing Enter continues inside the code block. Use `Ctrl+Enter` to return to normal paragraph text.
 
-## 自动保存与配置
+## Auto Save and Configuration
 
-主要配置位于 `note/config.json`，包括：
+Main config is in `note/config.json`, including:
 
-- 主题、字号、换行、行号等显示项
-- 最近文件、固定笔记、标签滚动条显示
-- 默认编码、自动检测编码
-- 自动保存开关与间隔秒数
-- 表格样式、标题序号显示等
+- Theme, font size, wrapping, line numbers, and other display options
+- Recent files, pinned notes, tab scrollbar display
+- Default encoding and auto encoding detection
+- Auto-save enable switch and interval (seconds)
+- Table style and heading section number display
 
-如果你偏好手动保存，可关闭自动保存；如果写作频繁，建议开启自动保存。
-
----
-
-## 插件系统
-
-插件目录为程序同级的 `plugins/`。  
-每个插件子目录需包含 `desc.json` 与可执行程序。
-
-当前可见示例插件：
-- `cal`：行首 `=` 或 `Math` 围栏代码块自动计算
-- `xlsx2md`：把 xlsx/xlsm 转换为 Markdown 并打开
-- `simple` / `simple_py`：示例插件
-
-在侧栏「插件」页可查看状态和日志，并手动启停插件。
+If you prefer manual control, disable auto-save. If you write frequently, auto-save is recommended.
 
 ---
 
-## 单实例与文件打开行为
+## Plugin System
 
-- 程序采用单实例模式
-- 再次启动时会把待打开文件转发给已运行实例
-- 支持命令行传入文件路径
-- 支持拖放文件打开
-- 部分非纯文本文件可提示通过插件处理
+Plugin directory is `plugins/` next to the executable.  
+Each plugin subdirectory should contain `desc.json` and an executable.
+
+Built-in visible sample plugins:
+- `cal`: auto-calculate when line starts with `=` or in `Math` fenced code blocks
+- `xlsx2md`: converts xlsx/xlsm files to Markdown and opens them
+- `simple` / `simple_py`: sample plugins
+
+In the **Plugins** tab (left panel), you can view status/logs and manually start/stop plugins.
 
 ---
 
-## 进阶：密码链接（本地加密文本）
+## Single Instance and File Opening Behavior
 
-支持以下格式的密码链接：
+- The app runs in single-instance mode
+- Launching again forwards the target file path to the running instance
+- Supports command-line file path input
+- Supports drag-and-drop file opening
+- Some non-text files may prompt plugin-based handling
 
-`[标题](passwd:你的口令 "明文内容")`
+---
 
-可在文档中将内容加密保存为 `cipher:` 前缀数据，并在提供正确口令时解密恢复。  
-此功能适合轻量本地保密，不等同于专业密码管理器。
+## Advanced: Password Links (Local Encrypted Text)
+
+Supported password link format:
+
+`[Title](passwd:your_password "plain_text_content")`
+
+The app can encrypt content as `cipher:` prefixed data and decrypt it when the correct password is provided.  
+This is suitable for lightweight local privacy, but it is not a replacement for a professional password manager.

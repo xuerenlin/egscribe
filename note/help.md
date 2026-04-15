@@ -136,8 +136,10 @@ egscribe 是一个本地优先的 Markdown 笔记与轻量文本编辑器。
 > 第二行引用
 
 ---
-[egscribe 项目地址 gitee](https://gitee.com/linxueren_0/egscribe)
-[egscribe 项目地址 github](https://example.com)
+[egscribe Project on Gitee](https://gitee.com/linxueren_0/egscribe)
+
+[egscribe Project on GitHub](https://github.com/xuerenlin/egscribe)
+
 ![示例图片](image_019d9074-2c69-7282-9a0b-2f9faa6c3edc.png)
 
 说明：

@@ -137,7 +137,9 @@ This is `inline code`.
 
 ---
 [egscribe Project on Gitee](https://gitee.com/linxueren_0/egscribe)
-[egscribe Project on GitHub](https://example.com)
+
+[egscribe Project on GitHub](https://github.com/xuerenlin/egscribe)
+
 ![Sample Image](image_019d9074-2c69-7282-9a0b-2f9faa6c3edc.png)
 
 Notes:
