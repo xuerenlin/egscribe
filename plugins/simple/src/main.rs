@@ -121,13 +121,13 @@ impl PluginHandler for SimplePlugin {
                 api.notify("info", format!("File closed: {}", file_path))?;
             }
             "cursor_changed" => {
-                let line_no = data.get("line_no").and_then(|v| v.as_u64()).unwrap_or(0);
-                let column = data.get("column").and_then(|v| v.as_u64()).unwrap_or(0);
+                let _line_no = data.get("line_no").and_then(|v| v.as_u64()).unwrap_or(0);
+                let _column = data.get("column").and_then(|v| v.as_u64()).unwrap_or(0);
                 #[cfg(debug_assertions)]
                 {
                     let _ = api.notify(
                         "debug",
-                        format!("Cursor moved to line {}, column {}", line_no, column),
+                        format!("Cursor moved to line {}, column {}", _line_no, _column),
                     );
                 }
             }

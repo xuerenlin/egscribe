@@ -1,0 +1,14 @@
+# 插件日志: simple
+2026-04-16 08:09:13.776 [i Info] Loaded plugin config from E:\rustspace\egscribe\output\plugins\simple\desc.json
+2026-04-16 08:09:13.776 [i Info] Starting plugin 'simple' from E:\rustspace\egscribe\output\plugins\simple/simple.exe
+2026-04-16 08:09:13.784 [→ Send] Sending init request to plugin 'simple'
+2026-04-16 08:09:13.816 [i Info] Plugin 'simple' initialized successfully
+2026-04-16 08:09:14.811 [← Receive] Receive Plugin Message: Event(Ready { name: "Simple Plugin", version: "0.1.0", capabilities: ["echo", "greet"] })
+2026-04-16 08:09:18.821 [i Info] Stop requested by user
+2026-04-16 08:09:18.822 [i Info] Stop completed
+2026-04-16 08:09:42.729 [i Info] Start requested by user
+2026-04-16 08:09:42.730 [i Info] Starting plugin 'simple' from E:\rustspace\egscribe\output\plugins\simple/simple.exe
+2026-04-16 08:09:42.736 [→ Send] Sending init request to plugin 'simple'
+2026-04-16 08:09:42.767 [i Info] Plugin 'simple' initialized successfully
+2026-04-16 08:09:42.767 [i Info] Start completed
+2026-04-16 08:09:42.770 [← Receive] Receive Plugin Message: Event(Ready { name: "Simple Plugin", version: "0.1.0", capabilities: ["echo", "greet"] })

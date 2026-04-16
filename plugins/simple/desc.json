@@ -8,7 +8,7 @@
     "zh-CN": "这是一个简单的插件示例，演示了插件系统的基本功能，包括命令执行、事件通知等。",
     "en-US": "This is a simple plugin example that demonstrates the basic functionality of the plugin system, including command execution, event notifications, etc."
   },
-  "exe_path": "./plugins/simple/simple.exe",
+  "exe_path": "simple/simple",
   "args": [],
   "config": {
     "greeting": "Hello from plugin!"

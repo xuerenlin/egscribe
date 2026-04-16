@@ -1,7 +1,7 @@
 use core::f32;
 use std::collections::{HashMap, HashSet};
 use std::{fs, vec};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use crate::medit::cfg::EditCfg;
 use crate::uicom::{IconName, CONTROL_HIGHLIGHT, galley_builder, icon_button_builder};
 use crate::medit::{MarkDownImpl, Action, cfg::HeightMode};
@@ -630,17 +630,29 @@ impl NoteSpace {
         space
     }
 
+    pub fn work_dir(&self) -> &Path {
+        &self.work_dir
+    }
+
     fn set_work_dir(&mut self) {
         let exe_note_dir = std::env::current_exe()
             .ok()
             .and_then(|exe_path| exe_path.parent().map(|p| p.join("note")));
         let cur_note_dir = std::env::current_dir().ok().map(|p| p.join("note"));
+        let cur_output_note_dir = std::env::current_dir()
+            .ok()
+            .map(|p| p.join("output").join("note"));
 
         self.work_dir = if let Some(dir) = exe_note_dir.clone().filter(|dir| dir.exists()) {
+            dir
+        } else if let Some(dir) = cur_output_note_dir.clone().filter(|dir| dir.exists()) {
             dir
         } else if let Some(dir) = cur_note_dir.clone().filter(|dir| dir.exists()) {
             dir
         } else if let Some(dir) = exe_note_dir {
+            let _ = fs::create_dir_all(&dir);
+            dir
+        } else if let Some(dir) = cur_output_note_dir {
             let _ = fs::create_dir_all(&dir);
             dir
         } else {

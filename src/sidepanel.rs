@@ -288,17 +288,16 @@ impl SidePanel {
             match action {
                 PluginAction::StartStop(plugin_id, start) => {
                     if start {
-                        if let Err(e) = store.plugin_manager.start_plugin(&plugin_id) {
-                            log::error!("Failed to start plugin {}: {}", plugin_id, e);
-                        }
+                        let _ = store.plugin_manager.start_plugin(&plugin_id);
                     } else {
-                        if let Err(e) = store.plugin_manager.stop_plugin(&plugin_id) {
-                            log::error!("Failed to stop plugin {}: {}", plugin_id, e);
-                        }
+                        let _ = store.plugin_manager.stop_plugin(&plugin_id);
                     }
                 }
                 PluginAction::ShowLog(plugin_id) => {
                     Self::show_plugin_log(store, &plugin_id);
+                }
+                PluginAction::ShowConfig(plugin_id) => {
+                    Self::show_plugin_config(store, &plugin_id);
                 }
             }
         }
@@ -371,6 +370,19 @@ impl SidePanel {
         let log_file_path_str = log_file_path.to_string_lossy().to_string();
         if let Err(e) = store.open_file(&log_file_path_str) {
             log::error!("Failed to open plugin log file: {}", e);
+        }
+    }
+
+    /// 显示插件配置（打开对应 desc.json 便于实时修改）
+    fn show_plugin_config(store: &mut Store, plugin_id: &str) {
+        let Some(config_path) = store.plugin_manager.get_plugin_config_path(plugin_id) else {
+            log::warn!("No config found for plugin: {}", plugin_id);
+            return;
+        };
+
+        let config_path_str = config_path.to_string_lossy().to_string();
+        if let Err(e) = store.open_file(&config_path_str) {
+            log::error!("Failed to open plugin config file: {}", e);
         }
     }
 }

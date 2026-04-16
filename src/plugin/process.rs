@@ -64,7 +64,24 @@ pub struct PluginProcess {
 impl PluginProcess {
     /// 启动插件进程
     pub fn start(plugin_id: String, exe_path: &str, args: Vec<String>, current_dir: Option<std::path::PathBuf>) -> Result<Self, String> {
-        let mut cmd = Command::new(exe_path);
+        #[cfg(windows)]
+        let resolved_exe_path = {
+            let candidate = std::path::PathBuf::from(exe_path);
+            if candidate.extension().is_none() && (candidate.components().count() > 1 || candidate.is_absolute()) {
+                let candidate_exe = candidate.with_extension("exe");
+                if candidate_exe.exists() {
+                    candidate_exe.to_string_lossy().to_string()
+                } else {
+                    exe_path.to_string()
+                }
+            } else {
+                exe_path.to_string()
+            }
+        };
+        #[cfg(not(windows))]
+        let resolved_exe_path = exe_path.to_string();
+
+        let mut cmd = Command::new(&resolved_exe_path);
         cmd.args(args);
         if let Some(dir) = current_dir {
             cmd.current_dir(dir);

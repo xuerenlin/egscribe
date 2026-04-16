@@ -117,6 +117,7 @@
   "plugin.action.stop": "Stop",
   "plugin.action.start": "Start",
   "plugin.action.log": "Log",
+  "plugin.action.config": "Config",
   "plugin.manager.no_plugins": "No plugins",
   "plugin.error.executable_not_found": "Plugin executable not found",
   "plugin.error.not_found": "Plugin not found",

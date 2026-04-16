@@ -14,11 +14,12 @@ if [ "$PROFILE" != "release" ] && [ "$PROFILE" != "debug" ]; then
     PROFILE="release"
 fi
 
-# 目标目录
+# 目标目录（构建产物在 target，最终发布内容在 output）
 TARGET_DIR="$SCRIPT_DIR/target/$PROFILE"
-PLUGINS_DIR="$TARGET_DIR/plugins"
+OUTPUT_DIR="$SCRIPT_DIR/output"
+PLUGINS_DIR="$OUTPUT_DIR/plugins"
 
-# 创建plugins目录
+# 创建 output/plugins 目录
 mkdir -p "$PLUGINS_DIR"
 
 # 插件可执行文件名（根据平台）
@@ -117,6 +118,28 @@ for plugin_dir in plugins/*/; do
         fi
     fi
 done
+
+# 如果是 release 构建，则将主程序也复制到 output 目录
+if [ "$PROFILE" = "release" ]; then
+    if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" || "$OSTYPE" == "cygwin" ]]; then
+        MAIN_EXE="egscribe.exe"
+    else
+        MAIN_EXE="egscribe"
+    fi
+
+    MAIN_SRC="$TARGET_DIR/$MAIN_EXE"
+    MAIN_DST="$OUTPUT_DIR/$MAIN_EXE"
+
+    mkdir -p "$OUTPUT_DIR"
+
+    if [ -f "$MAIN_SRC" ]; then
+        cp "$MAIN_SRC" "$MAIN_DST"
+        chmod +x "$MAIN_DST" || true
+        echo "Copied main binary to $MAIN_DST"
+    else
+        echo "⚠ Main executable not found: $MAIN_SRC"
+    fi
+fi
 
 echo "Done!"
 

@@ -9,8 +9,12 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $ScriptDir
 
 $TargetDir = Join-Path $ScriptDir "target\$Profile"
-$PluginsDir = Join-Path $TargetDir "plugins"
+$OutputDir = Join-Path $ScriptDir "output"
+$PluginsDir = Join-Path $OutputDir "plugins"
 
+if (-not (Test-Path $OutputDir)) {
+    New-Item -ItemType Directory -Path $OutputDir | Out-Null
+}
 if (-not (Test-Path $PluginsDir)) {
     New-Item -ItemType Directory -Path $PluginsDir | Out-Null
 }
@@ -86,6 +90,20 @@ foreach ($Plugin in $PluginFolders) {
             Copy-Item -Path $PluginDescFile -Destination (Join-Path $PluginDstDir "desc.json") -Force
             Write-Host "  [OK] Created desc.json for Rust plugin: $PluginName"
         }
+    }
+}
+
+if ($Profile -eq "release") {
+    $MainExe = if ($IsWindows) { "egscribe.exe" } else { "egscribe" }
+    $MainSrc = Join-Path $TargetDir $MainExe
+    $MainDst = Join-Path $OutputDir $MainExe
+
+    if (Test-Path $MainSrc) {
+        Copy-Item -Path $MainSrc -Destination $MainDst -Force
+        Write-Host "Copied main binary to $MainDst"
+    }
+    else {
+        Write-Warning "Main executable not found: $MainSrc"
     }
 }
 

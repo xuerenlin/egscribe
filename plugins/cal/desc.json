@@ -8,7 +8,7 @@
     "zh-CN": "单行内容以 = 开头时，或使用 ```Math 代码块时，自动计算表达式并显示结果",
     "en-US": "Automatically calculates expressions and displays results when line content starts with = or when using ```Math code blocks"
   },
-  "exe_path": "./plugins/cal/cal.exe",
+  "exe_path": "cal/cal",
   "args": [],
   "config": {},
   "enabled": true,

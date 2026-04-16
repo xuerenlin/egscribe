@@ -342,8 +342,16 @@ impl EncodingManager {
             log::warn!("Encoding errors detected when writing file: {}", file_path);
         }
 
-        // Add BOM if needed
-        let final_content = if charset == &Charset::UTF8 {
+        // Preserve UTF-8 BOM only when source file already had BOM.
+        // New files default to UTF-8 without BOM to avoid parser issues (e.g. JSON).
+        let should_write_utf8_bom = charset == &Charset::UTF8
+            && self
+                .file_encodings
+                .get(file_path)
+                .map(|enc| enc.has_bom)
+                .unwrap_or(false);
+
+        let final_content = if should_write_utf8_bom {
             let mut with_bom = Vec::new();
             with_bom.extend_from_slice(&[0xEF, 0xBB, 0xBF]); // UTF-8 BOM
             with_bom.extend_from_slice(&encoded);

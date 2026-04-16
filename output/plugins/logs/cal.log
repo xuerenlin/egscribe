@@ -1,0 +1,43 @@
+# 插件日志: cal
+2026-04-16 08:49:56.126 [i Info] Loaded plugin config from E:\rustspace\egscribe\output\plugins\cal\desc.json
+2026-04-16 08:49:56.127 [X Error] Failed to auto start plugin cal: 插件可执行文件未找到: cal/cal1
+Resolved exe_path: cal/cal1
+Tried paths:
+  E:\rustspace\egscribe\output\plugins\cal\cal/cal1
+  E:\rustspace\egscribe\output\plugins\cal\cal/cal1.com
+  E:\rustspace\egscribe\output\plugins\cal\cal/cal1.exe
+  E:\rustspace\egscribe\output\plugins\cal\cal/cal1.bat
+  E:\rustspace\egscribe\output\plugins\cal\cal/cal1.cmd
+  E:\rustspace\egscribe\output\plugins\cal\cal/cal1.vbs
+  E:\rustspace\egscribe\output\plugins\cal\cal/cal1.vbe
+  E:\rustspace\egscribe\output\plugins\cal\cal/cal1.js
+  E:\rustspace\egscribe\output\plugins\cal\cal/cal1.jse
+  E:\rustspace\egscribe\output\plugins\cal\cal/cal1.wsf
+  E:\rustspace\egscribe\output\plugins\cal\cal/cal1.wsh
+  E:\rustspace\egscribe\output\plugins\cal\cal/cal1.msc
+  E:\rustspace\egscribe\output\plugins\cal\cal/cal1.py
+  E:\rustspace\egscribe\output\plugins\cal\cal/cal1.pyw
+  E:\rustspace\egscribe\output\plugins\cal\cal/cal1.cpl
+  E:\rustspace\egscribe\output\plugins\cal/cal1
+  E:\rustspace\egscribe\output\plugins\cal/cal1.com
+  E:\rustspace\egscribe\output\plugins\cal/cal1.exe
+  E:\rustspace\egscribe\output\plugins\cal/cal1.bat
+  E:\rustspace\egscribe\output\plugins\cal/cal1.cmd
+  E:\rustspace\egscribe\output\plugins\cal/cal1.vbs
+  E:\rustspace\egscribe\output\plugins\cal/cal1.vbe
+  E:\rustspace\egscribe\output\plugins\cal/cal1.js
+  E:\rustspace\egscribe\output\plugins\cal/cal1.jse
+  E:\rustspace\egscribe\output\plugins\cal/cal1.wsf
+  E:\rustspace\egscribe\output\plugins\cal/cal1.wsh
+  E:\rustspace\egscribe\output\plugins\cal/cal1.msc
+  E:\rustspace\egscribe\output\plugins\cal/cal1.py
+  E:\rustspace\egscribe\output\plugins\cal/cal1.pyw
+  E:\rustspace\egscribe\output\plugins\cal/cal1.cpl
+  cal/cal1
+2026-04-16 08:50:05.602 [i Info] Start requested by user
+2026-04-16 08:50:05.603 [i Info] Reloaded plugin config from E:\rustspace\egscribe\output\plugins\cal\desc.json before manual start
+2026-04-16 08:50:05.603 [i Info] Starting plugin 'cal' from E:\rustspace\egscribe\output\plugins\cal/cal.exe
+2026-04-16 08:50:05.610 [→ Send] Sending init request to plugin 'cal'
+2026-04-16 08:50:05.641 [i Info] Plugin 'cal' initialized successfully
+2026-04-16 08:50:05.641 [i Info] Start completed
+2026-04-16 08:50:05.647 [← Receive] Receive Plugin Message: Event(Ready { name: "Calculator Plugin", version: "0.1.0", capabilities: ["calculate"] })

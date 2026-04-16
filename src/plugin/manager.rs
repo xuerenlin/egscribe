@@ -2,7 +2,7 @@ use crate::plugin::process::PluginProcess;
 use crate::plugin::protocol::{PluginEvent, PluginMessage, PluginRequest};
 use crate::medit::Action;
 use crate::medit::Trigger;
-use crate::i18n::{tr, current_language, Language};
+use crate::i18n::{tr, tr_with_lang, current_language, Language};
 use serde::{Deserialize, Serialize, Deserializer};
 use serde_json;
 use std::collections::HashMap;
@@ -292,7 +292,7 @@ where
     D: Deserializer<'de>,
 {
     Option::<LocalizedString>::deserialize(deserializer)
-        .map(|opt| opt.unwrap_or_else(|| LocalizedString::Simple(tr("plugin.config.default_description"))))
+        .map(|opt| opt.unwrap_or_else(default_description))
 }
 
 /// 反序列化触发器列表
@@ -333,7 +333,10 @@ where
 
 /// 默认描述
 fn default_description() -> LocalizedString {
-    LocalizedString::Simple(tr("plugin.config.default_description"))
+    LocalizedString::Localized {
+        zh_cn: Some(tr_with_lang(Language::ZhCn, "plugin.config.default_description")),
+        en_us: Some(tr_with_lang(Language::EnUs, "plugin.config.default_description")),
+    }
 }
 
 /// 插件状态
@@ -366,6 +369,41 @@ pub struct PluginInstance {
 }
 
 impl PluginInstance {
+    fn push_attempt(attempted_paths: &mut Vec<PathBuf>, candidate: &PathBuf) {
+        if !attempted_paths.iter().any(|p| p == candidate) {
+            attempted_paths.push(candidate.clone());
+        }
+    }
+
+    fn resolve_candidate_executable(
+        candidate: PathBuf,
+        attempted_paths: &mut Vec<PathBuf>,
+    ) -> Option<PathBuf> {
+        Self::push_attempt(attempted_paths, &candidate);
+        if candidate.exists() {
+            return Some(candidate);
+        }
+        #[cfg(windows)]
+        {
+            if candidate.extension().is_none() {
+                let pathexts = std::env::var_os("PATHEXT")
+                    .unwrap_or_else(|| std::ffi::OsString::from(".COM;.EXE;.BAT;.CMD"));
+                for ext in pathexts.to_string_lossy().split(';') {
+                    let ext = ext.trim().trim_start_matches('.');
+                    if ext.is_empty() {
+                        continue;
+                    }
+                    let candidate_with_ext = candidate.with_extension(ext.to_ascii_lowercase());
+                    Self::push_attempt(attempted_paths, &candidate_with_ext);
+                    if candidate_with_ext.exists() {
+                        return Some(candidate_with_ext);
+                    }
+                }
+            }
+        }
+        None
+    }
+
     pub fn new(config: PluginConfig) -> Self {
         Self {
             config,
@@ -385,6 +423,10 @@ impl PluginInstance {
     pub fn set_plugin_dir(&mut self, plugin_dir: PathBuf) {
         self.plugin_dir = plugin_dir;
     }
+
+    fn set_error_status(&mut self, message: String) {
+        self.status = PluginStatus::Error(message);
+    }
     
     /// 启动插件
     pub fn start(&mut self) -> Result<(), String> {
@@ -393,9 +435,12 @@ impl PluginInstance {
         }
         
         // 解析可执行文件路径
+        let mut attempted_paths = Vec::new();
         let exe_path = if Path::new(&self.config.exe_path).is_absolute() {
             // 绝对路径，直接使用
-            PathBuf::from(&self.config.exe_path)
+            let absolute = PathBuf::from(&self.config.exe_path);
+            Self::push_attempt(&mut attempted_paths, &absolute);
+            absolute
         } else {
             // 相对路径：尝试多种解析方式
             let mut path = None;
@@ -407,8 +452,8 @@ impl PluginInstance {
                 if let Ok(exe_dir) = std::env::current_exe() {
                     if let Some(exe_parent) = exe_dir.parent() {
                         let candidate = exe_parent.join(exe_path_clean);
-                        if candidate.exists() {
-                            path = Some(candidate);
+                        if let Some(found) = Self::resolve_candidate_executable(candidate, &mut attempted_paths) {
+                            path = Some(found);
                         }
                     }
                 }
@@ -417,40 +462,30 @@ impl PluginInstance {
             // 策略2: 如果路径只是文件名（不包含路径分隔符），尝试在插件目录中查找
             if path.is_none() && is_system_command {
                 let candidate = self.plugin_dir.join(exe_path_clean);
-                if candidate.exists() {
-                    path = Some(candidate);
+                if let Some(found) = Self::resolve_candidate_executable(candidate, &mut attempted_paths) {
+                    path = Some(found);
                 }
             }
             
             // 策略3: 尝试相对于插件目录
             if path.is_none() {
                 let candidate = self.plugin_dir.join(exe_path_clean);
-                if candidate.exists() {
-                    path = Some(candidate);
+                if let Some(found) = Self::resolve_candidate_executable(candidate, &mut attempted_paths) {
+                    path = Some(found);
                 }
             }
-            
-            // 策略4: 尝试相对于可执行文件目录
+
+            // 策略4: 尝试相对于插件根目录（支持 "cal/cal" 这类相对 plugins 的路径）
             if path.is_none() {
-                if let Ok(exe_dir) = std::env::current_exe() {
-                    if let Some(exe_parent) = exe_dir.parent() {
-                        let candidate = exe_parent.join(exe_path_clean);
-                        if candidate.exists() {
-                            path = Some(candidate);
-                        }
+                if let Some(plugins_root) = self.plugin_dir.parent() {
+                    let candidate = plugins_root.join(exe_path_clean);
+                    if let Some(found) = Self::resolve_candidate_executable(candidate, &mut attempted_paths) {
+                        path = Some(found);
                     }
                 }
             }
             
-            // 策略5: 尝试相对于当前工作目录
-            if path.is_none() {
-                let candidate = PathBuf::from(exe_path_clean);
-                if candidate.exists() {
-                    path = Some(candidate.canonicalize().unwrap_or(candidate));
-                }
-            }
-            
-            // 策略6: 如果是系统命令（不包含路径分隔符），尝试在系统 PATH 中查找
+            // 策略5: 如果是系统命令（不包含路径分隔符），尝试在系统 PATH 中查找
             if path.is_none() && is_system_command {
                 // 使用 which 命令查找（Unix/Linux）或 where 命令（Windows）
                 #[cfg(unix)]
@@ -487,7 +522,11 @@ impl PluginInstance {
                 // std::process::Command 会在执行时查找 PATH
                 PathBuf::from(&self.config.exe_path)
             } else {
-                path.unwrap_or_else(|| PathBuf::from(&self.config.exe_path))
+                path.unwrap_or_else(|| {
+                    let fallback = PathBuf::from(&self.config.exe_path);
+                    Self::push_attempt(&mut attempted_paths, &fallback);
+                    fallback
+                })
             }
         };
         
@@ -497,15 +536,19 @@ impl PluginInstance {
             && !exe_path.to_string_lossy().contains('\\');
         
         if !is_system_command && !exe_path.exists() {
-            return Err(format!("{}: {} (resolved paths: plugin_dir={:?}, exe_dir={:?})", 
+            let attempted_lines = attempted_paths
+                .iter()
+                .map(|p| format!("  {}", p.display()))
+                .collect::<Vec<_>>()
+                .join("\n");
+            return Err(format!(
+                "{}: {}\nResolved exe_path: {}\nTried paths:\n{}",
                 tr("plugin.error.executable_not_found"),
-                self.config.exe_path, 
-                self.plugin_dir,
-                std::env::current_exe().ok().and_then(|p| p.parent().map(|p| p.to_path_buf()))
+                self.config.exe_path,
+                exe_path.display(),
+                attempted_lines
             ));
         }
-        
-
         
         let exe_path_str = exe_path.to_string_lossy().to_string();
         let plugin_id = self.config.id.clone();
@@ -560,6 +603,7 @@ impl PluginInstance {
     /// 处理插件消息
     pub fn handle_messages(&mut self) -> Vec<Action> {
         let mut commands = Vec::new();
+        let interaction_log = self.interaction_log.clone();
         
         if let Some(ref mut process) = self.process {
             // 处理所有待处理的消息
@@ -571,7 +615,7 @@ impl PluginInstance {
                         match event {
                             PluginEvent::Command { command, params } => {
                                 // 将插件命令转换为应用命令
-                                let cmd = Self::convert_plugin_command(&command, &params);
+                                let cmd = Self::convert_plugin_command(&interaction_log, &command, &params);
                                 if let Some(cmd) = cmd {
                                     commands.push(cmd);
                                 }
@@ -591,7 +635,10 @@ impl PluginInstance {
                     }
                     PluginMessage::Request(_) => {
                         // 插件不应该发送请求
-                        log::warn!("Plugin {} sent unexpected request", self.config.id);
+                        self.interaction_log.add(
+                            LogCategory::Warning,
+                            format!("Plugin {} sent unexpected request", self.config.id),
+                        );
                     }
                 }
             }
@@ -607,12 +654,19 @@ impl PluginInstance {
     }
     
     /// 转换插件命令为应用命令
-    fn convert_plugin_command(command: &str, params: &HashMap<String, serde_json::Value>) -> Option<Action> {
+    fn convert_plugin_command(
+        interaction_log: &PluginInteractionLog,
+        command: &str,
+        params: &HashMap<String, serde_json::Value>,
+    ) -> Option<Action> {
         // 使用 Action::from_command 动态创建 Action（带验证）
         match Action::from_command(command, params) {
             Ok(action) => Some(action),
             Err(e) => {
-                log::warn!("Failed to convert plugin command '{}': {}", command, e);
+                interaction_log.add(
+                    LogCategory::Warning,
+                    format!("Failed to convert plugin command '{}': {}", command, e),
+                );
                 None
             }
         }
@@ -749,6 +803,8 @@ pub enum PluginAction {
     StartStop(String, bool),
     /// 显示插件日志 (plugin_id)
     ShowLog(String),
+    /// 显示插件配置文件 (plugin_id)
+    ShowConfig(String),
 }
 
 /// 插件管理器
@@ -760,6 +816,25 @@ pub struct PluginManager {
 }
 
 impl PluginManager {
+    fn load_plugin_config_from_file(plugin_config_file: &Path) -> Result<PluginConfig, String> {
+        let json = std::fs::read_to_string(plugin_config_file).map_err(|e| {
+            format!(
+                "{} {:?}: {}",
+                tr("plugin.error.read_config"),
+                plugin_config_file,
+                e
+            )
+        })?;
+        serde_json::from_str(&json).map_err(|e| {
+            format!(
+                "{} {:?}: {}",
+                tr("plugin.error.parse_config"),
+                plugin_config_file,
+                e
+            )
+        })
+    }
+
     /// 创建插件管理器
     pub fn new(plugin_dir: PathBuf) -> Self {
         Self {
@@ -785,6 +860,11 @@ impl PluginManager {
             
             // 在每个插件目录中查找 desc.json
             let plugin_config_file = path.join("desc.json");
+            let plugin_dir_name = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("unknown_plugin")
+                .to_string();
             
             if !plugin_config_file.exists() {
                 // 如果不存在 desc.json，跳过该插件
@@ -792,23 +872,85 @@ impl PluginManager {
             }
             
             // 读取并解析插件配置
-            let json = std::fs::read_to_string(&plugin_config_file)
-                .map_err(|e| format!("{} {:?}: {}", tr("plugin.error.read_config"), plugin_config_file, e))?;
+            let json = match std::fs::read_to_string(&plugin_config_file) {
+                Ok(json) => json,
+                Err(e) => {
+                    let mut instance = PluginInstance::new(PluginConfig {
+                        id: plugin_dir_name.clone(),
+                        name: LocalizedString::Simple(plugin_dir_name.clone()),
+                        description: default_description(),
+                        exe_path: String::new(),
+                        args: Vec::new(),
+                        config: HashMap::new(),
+                        enabled: true,
+                        auto_start: false,
+                        triggers: Vec::new(),
+                        commands: Vec::new(),
+                    });
+                    instance.set_plugin_dir(path.clone());
+                    let reason = format!(
+                        "{} {:?}: {}",
+                        tr("plugin.error.read_config"),
+                        plugin_config_file,
+                        e
+                    );
+                    instance
+                        .interaction_log
+                        .add(LogCategory::Error, format!("Load failed: {}", reason));
+                    instance.set_error_status(format!("Load failed: {}", reason));
+                    self.plugins.insert(plugin_dir_name.clone(), instance);
+                    continue;
+                }
+            };
             
             // 解析为插件配置对象
-            let config: PluginConfig = serde_json::from_str(&json)
-                .map_err(|e| format!("{} {:?}: {}", tr("plugin.error.parse_config"), plugin_config_file, e))?;
-            
-            println!("{:?}", config);
+            let config: PluginConfig = match serde_json::from_str(&json) {
+                Ok(config) => config,
+                Err(e) => {
+                    let mut instance = PluginInstance::new(PluginConfig {
+                        id: plugin_dir_name.clone(),
+                        name: LocalizedString::Simple(plugin_dir_name.clone()),
+                        description: default_description(),
+                        exe_path: String::new(),
+                        args: Vec::new(),
+                        config: HashMap::new(),
+                        enabled: true,
+                        auto_start: false,
+                        triggers: Vec::new(),
+                        commands: Vec::new(),
+                    });
+                    instance.set_plugin_dir(path.clone());
+                    let reason = format!(
+                        "{} {:?}: {}",
+                        tr("plugin.error.parse_config"),
+                        plugin_config_file,
+                        e
+                    );
+                    instance
+                        .interaction_log
+                        .add(LogCategory::Error, format!("Load failed: {}", reason));
+                    instance.set_error_status(format!("Load failed: {}", reason));
+                    self.plugins.insert(plugin_dir_name.clone(), instance);
+                    continue;
+                }
+            };
             
             if config.enabled {
                 let mut instance = PluginInstance::new(config.clone());
                 // 设置插件目录为各自的插件目录，用于解析相对路径
                 instance.set_plugin_dir(path.clone());
+                instance.interaction_log.add(
+                    LogCategory::Info,
+                    format!("Loaded plugin config from {}", plugin_config_file.display()),
+                );
                 
                 if config.auto_start {
                     if let Err(e) = instance.start() {
-                        log::error!("Failed to start plugin {}: {}", config.id, e);
+                        instance.interaction_log.add(
+                            LogCategory::Error,
+                            format!("Failed to auto start plugin {}: {}", config.id, e),
+                        );
+                        instance.set_error_status(format!("Load failed: {}", e));
                     }
                 }
                 
@@ -834,7 +976,53 @@ impl PluginManager {
     /// 启动插件
     pub fn start_plugin(&mut self, plugin_id: &str) -> Result<(), String> {
         if let Some(plugin) = self.plugins.get_mut(plugin_id) {
-            plugin.start()
+            plugin
+                .interaction_log
+                .add(LogCategory::Info, "Start requested by user".to_string());
+
+            // 手动启动时始终从 desc.json 重新加载配置，确保修改即时生效。
+            let plugin_config_file = plugin.plugin_dir.join("desc.json");
+            match Self::load_plugin_config_from_file(&plugin_config_file) {
+                Ok(mut config) => {
+                    if config.id != plugin_id {
+                        plugin.interaction_log.add(
+                            LogCategory::Warning,
+                            format!(
+                                "Plugin id in config '{}' differs from managed id '{}', using managed id",
+                                config.id, plugin_id
+                            ),
+                        );
+                        config.id = plugin_id.to_string();
+                    }
+                    plugin.config = config;
+                    plugin.interaction_log.add(
+                        LogCategory::Info,
+                        format!(
+                            "Reloaded plugin config from {} before manual start",
+                            plugin_config_file.display()
+                        ),
+                    );
+                }
+                Err(e) => {
+                    plugin
+                        .interaction_log
+                        .add(LogCategory::Error, format!("Reload config failed: {}", e));
+                    plugin.set_error_status(format!("Start failed: {}", e));
+                    return Err(e);
+                }
+            }
+
+            if let Err(e) = plugin.start() {
+                plugin
+                    .interaction_log
+                    .add(LogCategory::Error, format!("Start failed: {}", e));
+                plugin.set_error_status(format!("Start failed: {}", e));
+                return Err(e);
+            }
+            plugin
+                .interaction_log
+                .add(LogCategory::Info, "Start completed".to_string());
+            Ok(())
         } else {
             Err(format!("{}: {}", tr("plugin.error.not_found"), plugin_id))
         }
@@ -843,7 +1031,20 @@ impl PluginManager {
     /// 停止插件
     pub fn stop_plugin(&mut self, plugin_id: &str) -> Result<(), String> {
         if let Some(plugin) = self.plugins.get_mut(plugin_id) {
-            plugin.stop()
+            plugin
+                .interaction_log
+                .add(LogCategory::Info, "Stop requested by user".to_string());
+            if let Err(e) = plugin.stop() {
+                plugin
+                    .interaction_log
+                    .add(LogCategory::Error, format!("Stop failed: {}", e));
+                plugin.set_error_status(format!("Stop failed: {}", e));
+                return Err(e);
+            }
+            plugin
+                .interaction_log
+                .add(LogCategory::Info, "Stop completed".to_string());
+            Ok(())
         } else {
             Err(format!("{}: {}", tr("plugin.error.not_found"), plugin_id))
         }
@@ -915,13 +1116,23 @@ impl PluginManager {
         self.plugins.get(plugin_id)
             .map(|plugin| plugin.interaction_log().get_all())
     }
+
+    /// 获取插件配置文件路径（desc.json）
+    pub fn get_plugin_config_path(&self, plugin_id: &str) -> Option<PathBuf> {
+        self.plugins
+            .get(plugin_id)
+            .map(|plugin| plugin.plugin_dir.join("desc.json"))
+    }
     
     /// 通知所有配置了相应触发器的插件
     #[allow(dead_code)]
     pub fn notify_event(&mut self, trigger: Trigger, event_data: HashMap<String, serde_json::Value>) {
         for (_plugin_id, plugin) in self.plugins.iter_mut() {
             if let Err(e) = plugin.notify_event(trigger.clone(), event_data.clone()) {
-                log::warn!("Failed to notify plugin {}: {}", plugin.config().id, e);
+                plugin.interaction_log.add(
+                    LogCategory::Warning,
+                    format!("Failed to notify plugin {}: {}", plugin.config().id, e),
+                );
             }
         }
     }
@@ -963,18 +1174,13 @@ impl PluginManager {
             PluginStatus::NotLoaded => (tr("plugin.status.not_loaded"), Color32::GRAY),
             PluginStatus::Loaded => (tr("plugin.status.loaded"), Color32::from_rgb(200, 200, 0)),
             PluginStatus::Running => (tr("plugin.status.running"), Color32::from_rgb(0, 200, 0)),
-            PluginStatus::Error(e) => {
-                ui.horizontal(|ui| {
-                    ui.label(tr("plugin.status.label"));
-                    ui.colored_label(Color32::RED, format!("{}: {}", tr("plugin.status.error"), e));
-                });
-                return;
-            }
+            PluginStatus::Error(_e) => (tr("plugin.status.error"), Color32::RED),
         };
         
         ui.horizontal(|ui| {
             ui.label(tr("plugin.status.label"));
             ui.colored_label(status_color, &status_text);
+
             match status {
                 PluginStatus::Running => {
                     if ui.button(tr("plugin.action.stop")).clicked() {
@@ -989,6 +1195,9 @@ impl PluginManager {
             }
             if ui.button(tr("plugin.action.log")).clicked() {
                 actions.push(PluginAction::ShowLog(plugin_id.to_string()));
+            }
+            if ui.button(tr("plugin.action.config")).clicked() {
+                actions.push(PluginAction::ShowConfig(plugin_id.to_string()));
             }
         });
     }

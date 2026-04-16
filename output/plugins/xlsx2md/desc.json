@@ -1,0 +1,23 @@
+{
+  "id": "xlsx2md",
+  "name": {
+    "zh-CN": "XLSX 转 Markdown 插件",
+    "en-US": "XLSX to Markdown Plugin"
+  },
+  "description": {
+    "zh-CN": "接收 hex_file_to_md 命令，将 xlsx 文件转换为 markdown 并通知主程序打开。",
+    "en-US": "Handles hex_file_to_md command, converts xlsx file to markdown, and asks app to open it."
+  },
+  "exe_path": "xlsx2md/xlsx2md",
+  "args": [],
+  "config": {},
+  "enabled": true,
+  "auto_start": true,
+  "triggers": [],
+  "commands": [
+    {
+      "command": "hex_file_to_md",
+      "extensions": ["xlsx", "xlsm"]
+    }
+  ]
+}

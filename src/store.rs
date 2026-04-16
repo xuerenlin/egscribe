@@ -259,9 +259,11 @@ pub struct Store {
 
 impl Store {
     pub fn default() -> Self {
-        // 获取插件目录
-        let exe_path = std::env::current_exe().unwrap();
-        let plugin_dir = exe_path.parent()
+        // 先确定工作目录，再让插件目录跟随工作目录（work_dir 同级）
+        let note_space = NoteSpace::new();
+        let plugin_dir = note_space
+            .work_dir()
+            .parent()
             .map(|p| p.join("plugins"))
             .unwrap_or_else(|| PathBuf::from("./plugins"));
         
@@ -280,7 +282,7 @@ impl Store {
         
         let mut store = Self {
             ectx_map: HashMap::new(),
-            note_space: NoteSpace::new(),
+            note_space,
             config: Config::default(),
             tool_bar_info: ToolBarInfo::default(),
             find_window: FindWindow::new(),

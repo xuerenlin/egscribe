@@ -60,6 +60,7 @@ struct MyApp {
     title: String,
     ipc_rx: Option<mpsc::Receiver<String>>,
     side_panel: SidePanel,
+    #[allow(dead_code)]
     #[cfg(windows)]
     last_tsf_seq: u64,
 }
@@ -88,6 +89,7 @@ impl MyApp {
         }
     }
 
+    #[allow(dead_code)]
     #[cfg(windows)]
     fn trace_tsf_state(&mut self) {
         if let Some(snapshot) = crate::ime_win_bridge::tsf_win::poll_tsf_snapshot() {

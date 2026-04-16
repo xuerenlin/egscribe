@@ -117,6 +117,7 @@
   "plugin.action.stop": "停止",
   "plugin.action.start": "启动",
   "plugin.action.log": "日志",
+  "plugin.action.config": "配置",
   "plugin.manager.no_plugins": "暂无插件",
   "plugin.error.executable_not_found": "插件可执行文件未找到",
   "plugin.error.not_found": "插件未找到",
