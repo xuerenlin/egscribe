@@ -1,4 +1,4 @@
-pub mod sitter;
+pub use egscribe_sitter as sitter;
 pub mod ime_win_bridge;
 pub mod util;
 pub mod medit;

@@ -39,7 +39,7 @@ pub struct SpacingConfig {
 }
 
 impl SpacingConfig {
-    pub fn new(font_size: f32) -> Self {
+    pub fn new(_font_size: f32) -> Self {
         Self {
             paragraph: ParagraphSpacing::new(0.5, 0.5), 
             heading: ParagraphSpacing::new(0.0, 0.0),
@@ -86,6 +86,7 @@ impl HeightMode {
 pub struct EditCfg {
     pub is_markdown: bool,
     pub image_path: Option<String>,     //save image in markdown
+    pub plantuml_jar_path: Option<String>,
     pub lang: Option<String>,
 
     pub wrap: bool,
@@ -109,6 +110,7 @@ pub struct EditCfg {
     pub table_frame_style: TableFrameStyle,
     pub show_heading_section_numbers: bool,
     pub show_table_row_no: bool,
+    pub show_table_head_checkbox: bool,
 }
 
 impl EditCfg {
@@ -116,6 +118,7 @@ impl EditCfg {
         Self {
             is_markdown,
             image_path,
+            plantuml_jar_path: None,
             lang: None,
             wrap: false,
             show_line_no: false,
@@ -151,6 +154,7 @@ impl EditCfg {
             table_frame_style: TableFrameStyle::Horizontal,
             show_heading_section_numbers: true,
             show_table_row_no: true,
+            show_table_head_checkbox: true,
         }
     }
 

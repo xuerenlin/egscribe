@@ -5,9 +5,9 @@ use crate::medit::Trigger;
 use crate::i18n::{tr, tr_with_lang, current_language, Language};
 use serde::{Deserialize, Serialize, Deserializer};
 use serde_json;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 use std::sync::{Arc, Mutex};
 use chrono::{DateTime, Utc};
 use regex::Regex;
@@ -248,6 +248,39 @@ impl PluginCommandDef {
     }
 }
 
+/// 插件可注册到编辑器右键菜单的条目（desc.json 中 `context_menus` 数组元素）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PluginContextMenuDef {
+    /// 菜单名称（支持多语言）
+    #[serde(deserialize_with = "deserialize_localized_string")]
+    pub name: LocalizedString,
+    /// 关联的插件命令名
+    pub command: String,
+    /// 菜单点击时附带给插件命令的参数模板
+    #[serde(default)]
+    pub params: HashMap<String, serde_json::Value>,
+    /// 为 `false` 时不出现在编辑器右键菜单中；省略时默认为 `true`
+    #[serde(default = "default_true")]
+    pub visible: bool,
+    /// 右键菜单中的排序权重，数值越小越靠前；省略时默认为 `0`
+    #[serde(default)]
+    pub sort_value: i32,
+    /// 是否可出现在「在所有同级段落中执行」「在所有子级目录（叶子段落）中执行」子菜单中；缺省为 `false`
+    #[serde(default)]
+    pub supports_batch_concurrent: bool,
+}
+
+/// 供编辑器层消费的插件右键菜单条目
+#[derive(Debug, Clone)]
+pub struct PluginContextMenuItem {
+    pub plugin_id: String,
+    pub name: String,
+    pub command: String,
+    pub params: HashMap<String, serde_json::Value>,
+    pub sort_value: i32,
+    pub supports_batch_concurrent: bool,
+}
+
 /// 插件配置
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PluginConfig {
@@ -276,6 +309,9 @@ pub struct PluginConfig {
     /// 主进程可主动调用的命令及适用扩展名（如非文本文件转换）
     #[serde(default)]
     pub commands: Vec<PluginCommandDef>,
+    /// 编辑器右键菜单定义，关联 `commands` 中已注册的命令
+    #[serde(default)]
+    pub context_menus: Vec<PluginContextMenuDef>,
 }
 
 /// 反序列化 LocalizedString（必需字段）
@@ -339,6 +375,10 @@ fn default_description() -> LocalizedString {
     }
 }
 
+fn default_true() -> bool {
+    true
+}
+
 /// 插件状态
 #[derive(Debug, Clone)]
 pub enum PluginStatus {
@@ -354,6 +394,79 @@ pub enum PluginStatus {
     Error(String),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
+pub enum PluginExecStatus {
+    Running,
+    Success,
+    Failed,
+    Timeout,
+}
+
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct NotifyItem {
+    pub level: String,
+    pub message: String,
+    pub timestamp: SystemTime,
+}
+
+#[derive(Debug, Clone)]
+pub struct PluginExecRequest {
+    pub request_id: String,
+    pub plugin_id: String,
+    pub command: String,
+    pub params_preview: String,
+    pub current_outline_name: Option<String>,
+    pub started_at: SystemTime,
+    pub ended_at: Option<SystemTime>,
+    pub duration_ms: Option<u128>,
+    pub status: PluginExecStatus,
+    pub response_data_preview: Option<String>,
+    pub error_message: Option<String>,
+    pub notify_events: Vec<NotifyItem>,
+}
+
+#[derive(Debug, Clone)]
+pub struct UiNotification {
+    pub plugin_id: String,
+    pub command: Option<String>,
+    pub request_id: Option<String>,
+    pub level: String,
+    pub message: String,
+    /// When this notification was first shown in the status bar.
+    pub status_shown_at: Option<Instant>,
+}
+
+impl UiNotification {
+    const STATUS_BAR_TTL: Duration = Duration::from_secs(5);
+
+    /// Mark the notification as shown in the status bar if needed.
+    /// Returns false when it should no longer be displayed.
+    pub fn ensure_status_shown_at(&mut self) -> bool {
+        if let Some(shown_at) = self.status_shown_at {
+            shown_at.elapsed() < Self::STATUS_BAR_TTL
+        } else {
+            self.status_shown_at = Some(Instant::now());
+            true
+        }
+    }
+
+    pub fn list_title(&self) -> String {
+        match self.request_id.as_ref() {
+            Some(id) => format!("[{}] #{} {}", self.level.to_uppercase(), id, self.message),
+            None => format!("[{}] {}", self.level.to_uppercase(), self.message),
+        }
+    }
+
+    pub fn status_message(&self) -> String {
+        match self.request_id.as_ref() {
+            Some(id) => format!("#{} {}", id, self.message),
+            None => self.message.clone(),
+        }
+    }
+}
+
 /// 插件实例
 pub struct PluginInstance {
     /// 插件配置
@@ -366,6 +479,12 @@ pub struct PluginInstance {
     plugin_dir: PathBuf,
     /// 插件交互日志（记录所有交互信息）
     interaction_log: PluginInteractionLog,
+    /// 进行中的异步执行请求
+    exec_requests: HashMap<String, PluginExecRequest>,
+    /// 最近完成的异步执行历史
+    exec_history: VecDeque<PluginExecRequest>,
+    /// 待 UI 展示的通知
+    pending_notifications: VecDeque<UiNotification>,
 }
 
 impl PluginInstance {
@@ -411,6 +530,9 @@ impl PluginInstance {
             status: PluginStatus::NotLoaded,
             plugin_dir: PathBuf::new(), // 将在启动时设置
             interaction_log: PluginInteractionLog::new(2048), 
+            exec_requests: HashMap::new(),
+            exec_history: VecDeque::new(),
+            pending_notifications: VecDeque::new(),
         }
     }
     
@@ -605,9 +727,19 @@ impl PluginInstance {
         let mut commands = Vec::new();
         let interaction_log = self.interaction_log.clone();
         
-        if let Some(ref mut process) = self.process {
+        if self.process.is_some() {
             // 处理所有待处理的消息
-            while let Ok(msg) = process.try_recv() {
+            loop {
+                let msg = {
+                    if let Some(process) = self.process.as_mut() {
+                        process.try_recv().ok()
+                    } else {
+                        None
+                    }
+                };
+                let Some(msg) = msg else {
+                    break;
+                };
                 let log = format!("Receive Plugin Message: {:?}", msg);
                 self.interaction_log.add(LogCategory::Receive, log);
                 match msg {
@@ -620,7 +752,23 @@ impl PluginInstance {
                                     commands.push(cmd);
                                 }
                             }
-                            PluginEvent::Notify { level: _, message: _ } => {
+                            PluginEvent::Notify { level, message } => {
+                                let notify = NotifyItem {
+                                    level: level.clone(),
+                                    message: message.clone(),
+                                    timestamp: SystemTime::now(),
+                                };
+                                if let Some(exec) = self.only_running_request_mut() {
+                                    exec.notify_events.push(notify);
+                                }
+                                self.pending_notifications.push_back(UiNotification {
+                                    plugin_id: self.config.id.clone(),
+                                    command: self.only_running_request().map(|r| r.command.clone()),
+                                    request_id: self.only_running_request().map(|r| r.request_id.clone()),
+                                    level,
+                                    message: format!("[recv notify] {}", message),
+                                    status_shown_at: None,
+                                });
                             }
                             PluginEvent::Ready { name: _, version: _, capabilities: _ } => {
                             }
@@ -628,7 +776,8 @@ impl PluginInstance {
                             }
                         }
                     }
-                    PluginMessage::Response(_resp) => {
+                    PluginMessage::Response(resp) => {
+                        self.handle_async_response(resp);
                     }
                     PluginMessage::Error(err) => {
                         self.status = PluginStatus::Error(err.message.clone());
@@ -644,7 +793,12 @@ impl PluginInstance {
             }
             
             // 检查进程状态
-            if !process.is_running() {
+            let process_running = self
+                .process
+                .as_mut()
+                .map(|process| process.is_running())
+                .unwrap_or(false);
+            if !process_running {
                 self.status = PluginStatus::Error("Process exited".to_string());
                 self.process = None;
             }
@@ -705,6 +859,175 @@ impl PluginInstance {
             let error = tr("plugin.error.not_running");
             self.interaction_log.add(LogCategory::Error, format!("Execute failed: {} - {}", command, error));
             Err(error)
+        }
+    }
+
+    /// 异步触发插件命令：仅发送请求，不在当前线程等待 response。
+    pub fn execute_async(
+        &mut self,
+        command: String,
+        params: HashMap<String, serde_json::Value>,
+    ) -> Result<String, String> {
+        if let Some(ref mut process) = self.process {
+            let request_id = format!(
+                "exec_async_{}",
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos()
+            );
+            self.interaction_log
+                .add(LogCategory::Send, format!("Execute async: {} ({:?})", command, params));
+            let request = PluginRequest::Execute {
+                id: request_id.clone(),
+                command: command.clone(),
+                params: params.clone(),
+            };
+            process.send(PluginMessage::Request(request))?;
+            self.exec_requests.insert(
+                request_id.clone(),
+                PluginExecRequest {
+                    request_id: request_id.clone(),
+                    plugin_id: self.config.id.clone(),
+                    command,
+                    params_preview: Self::summarize_params(&params),
+                    current_outline_name: Self::current_outline_name_from_params(&params),
+                    started_at: SystemTime::now(),
+                    ended_at: None,
+                    duration_ms: None,
+                    status: PluginExecStatus::Running,
+                    response_data_preview: None,
+                    error_message: None,
+                    notify_events: Vec::new(),
+                },
+            );
+            Ok(request_id)
+        } else {
+            let error = tr("plugin.error.not_running");
+            self.interaction_log.add(
+                LogCategory::Error,
+                format!("Execute async failed: {} - {}", command, error),
+            );
+            Err(error)
+        }
+    }
+
+    pub fn take_ui_notifications(&mut self) -> Vec<UiNotification> {
+        self.pending_notifications.drain(..).collect()
+    }
+
+    pub fn exec_history(&self) -> &VecDeque<PluginExecRequest> {
+        &self.exec_history
+    }
+
+    pub fn running_requests(&self) -> Vec<&PluginExecRequest> {
+        self.exec_requests.values().collect()
+    }
+
+    pub fn running_request_count(&self) -> usize {
+        self.exec_requests.len()
+    }
+
+    fn summarize_params(params: &HashMap<String, serde_json::Value>) -> String {
+        let text = serde_json::to_string(params).unwrap_or_else(|_| "{}".to_string());
+        Self::truncate_string(text, 220)
+    }
+
+    fn current_outline_name_from_params(params: &HashMap<String, serde_json::Value>) -> Option<String> {
+        use crate::plugin::dynamic_params::PARAM_CURRENT_OUTLINE_NAME;
+        match params.get(PARAM_CURRENT_OUTLINE_NAME)? {
+            serde_json::Value::String(s) => {
+                let t = s.trim();
+                if t.is_empty() {
+                    None
+                } else {
+                    Some(t.to_string())
+                }
+            }
+            _ => None,
+        }
+    }
+
+    fn summarize_json(value: serde_json::Value) -> String {
+        let text = match value {
+            serde_json::Value::String(s) => s,
+            other => serde_json::to_string_pretty(&other).unwrap_or_else(|_| other.to_string()),
+        };
+        Self::truncate_string(text, 320)
+    }
+
+    fn truncate_string(mut text: String, max: usize) -> String {
+        if text.chars().count() <= max {
+            return text;
+        }
+        text = text.chars().take(max).collect::<String>();
+        text.push_str("...");
+        text
+    }
+
+    fn only_running_request_mut(&mut self) -> Option<&mut PluginExecRequest> {
+        if self.exec_requests.len() != 1 {
+            return None;
+        }
+        self.exec_requests.values_mut().next()
+    }
+
+    fn only_running_request(&self) -> Option<&PluginExecRequest> {
+        if self.exec_requests.len() != 1 {
+            return None;
+        }
+        self.exec_requests.values().next()
+    }
+
+    fn finalize_request(&mut self, mut req: PluginExecRequest) {
+        if self.exec_history.len() >= 100 {
+            self.exec_history.pop_front();
+        }
+        req.ended_at = req.ended_at.or(Some(SystemTime::now()));
+        self.exec_history.push_back(req);
+    }
+
+    fn handle_async_response(&mut self, resp: crate::plugin::protocol::PluginResponse) {
+        if let Some(mut req) = self.exec_requests.remove(&resp.id) {
+            let end = SystemTime::now();
+            let duration_ms = end
+                .duration_since(req.started_at)
+                .unwrap_or_else(|_| Duration::from_millis(0))
+                .as_millis();
+            req.ended_at = Some(end);
+            req.duration_ms = Some(duration_ms);
+            req.status = if resp.success {
+                PluginExecStatus::Success
+            } else {
+                PluginExecStatus::Failed
+            };
+            req.response_data_preview = resp.data.map(Self::summarize_json);
+            req.error_message = resp.error.clone();
+
+            let level = if resp.success { "info" } else { "error" }.to_string();
+            let message = if resp.success {
+                format!("[recv response] {} 执行成功 ({} ms)", req.command, duration_ms)
+            } else {
+                format!(
+                    "[recv response] {} 执行失败: {}",
+                    req.command,
+                    req.error_message.clone().unwrap_or_else(|| "Unknown error".to_string())
+                )
+            };
+            self.pending_notifications.push_back(UiNotification {
+                plugin_id: req.plugin_id.clone(),
+                command: Some(req.command.clone()),
+                request_id: Some(req.request_id.clone()),
+                level,
+                message,
+                status_shown_at: None,
+            });
+            self.finalize_request(req);
+        } else {
+            self.interaction_log.add(
+                LogCategory::Warning,
+                format!("Orphan response without matched request id: {}", resp.id),
+            );
         }
     }
     
@@ -886,6 +1209,7 @@ impl PluginManager {
                         auto_start: false,
                         triggers: Vec::new(),
                         commands: Vec::new(),
+                        context_menus: Vec::new(),
                     });
                     instance.set_plugin_dir(path.clone());
                     let reason = format!(
@@ -918,6 +1242,7 @@ impl PluginManager {
                         auto_start: false,
                         triggers: Vec::new(),
                         commands: Vec::new(),
+                        context_menus: Vec::new(),
                     });
                     instance.set_plugin_dir(path.clone());
                     let reason = format!(
@@ -1098,6 +1423,112 @@ impl PluginManager {
 
         self.execute_plugin_command(&plugin_id, command.to_string(), params)
     }
+
+    /// 执行指定插件的命令（必要时自动拉起）
+    #[allow(dead_code)]
+    pub fn execute_plugin_command_with_auto_start(
+        &mut self,
+        plugin_id: &str,
+        command: &str,
+        params: HashMap<String, serde_json::Value>,
+    ) -> Result<serde_json::Value, String> {
+        let Some(plugin) = self.plugins.get(plugin_id) else {
+            return Err(format!("{}: {}", tr("plugin.error.not_found"), plugin_id));
+        };
+        let command_registered = plugin.config().commands.iter().any(|c| c.command == command);
+        if !command_registered {
+            return Err(format!(
+                "插件「{}」未注册命令「{}」，请在 desc.json 的 commands 中声明",
+                plugin_id, command
+            ));
+        }
+
+        let need_start = self
+            .plugins
+            .get(plugin_id)
+            .map(|p| !matches!(p.status(), PluginStatus::Running))
+            .unwrap_or(true);
+
+        if need_start {
+            self.start_plugin(plugin_id)?;
+        }
+
+        self.execute_plugin_command(plugin_id, command.to_string(), params)
+    }
+
+    /// 异步执行指定插件命令（必要时自动拉起），不阻塞 UI 线程等待结果。
+    pub fn execute_plugin_command_async_with_auto_start(
+        &mut self,
+        plugin_id: &str,
+        command: &str,
+        params: HashMap<String, serde_json::Value>,
+    ) -> Result<String, String> {
+        let Some(plugin) = self.plugins.get(plugin_id) else {
+            return Err(format!("{}: {}", tr("plugin.error.not_found"), plugin_id));
+        };
+        let command_registered = plugin.config().commands.iter().any(|c| c.command == command);
+        if !command_registered {
+            return Err(format!(
+                "插件「{}」未注册命令「{}」，请在 desc.json 的 commands 中声明",
+                plugin_id, command
+            ));
+        }
+
+        let need_start = self
+            .plugins
+            .get(plugin_id)
+            .map(|p| !matches!(p.status(), PluginStatus::Running))
+            .unwrap_or(true);
+
+        if need_start {
+            self.start_plugin(plugin_id)?;
+        }
+
+        if let Some(plugin) = self.plugins.get_mut(plugin_id) {
+            plugin.execute_async(command.to_string(), params)
+        } else {
+            Err(format!("{}: {}", tr("plugin.error.not_found"), plugin_id))
+        }
+    }
+
+    /// 获取可显示在编辑器右键菜单中的插件菜单项
+    pub fn editor_context_menu_items(&self) -> Vec<PluginContextMenuItem> {
+        let mut plugin_ids: Vec<&String> = self.plugins.keys().collect();
+        plugin_ids.sort();
+
+        let mut items = Vec::new();
+        for plugin_id in plugin_ids {
+            if let Some(plugin) = self.plugins.get(plugin_id) {
+                for menu in &plugin.config().context_menus {
+                    if !menu.visible {
+                        continue;
+                    }
+                    if plugin
+                        .config()
+                        .commands
+                        .iter()
+                        .any(|c| c.command == menu.command)
+                    {
+                        items.push(PluginContextMenuItem {
+                            plugin_id: plugin_id.clone(),
+                            name: menu.name.get(),
+                            command: menu.command.clone(),
+                            params: menu.params.clone(),
+                            sort_value: menu.sort_value,
+                            supports_batch_concurrent: menu.supports_batch_concurrent,
+                        });
+                    }
+                }
+            }
+        }
+        items.sort_by(|a, b| {
+            a.sort_value
+                .cmp(&b.sort_value)
+                .then_with(|| a.plugin_id.cmp(&b.plugin_id))
+                .then_with(|| a.command.cmp(&b.command))
+        });
+        items
+    }
     
     /// 获取所有插件
     #[allow(dead_code)]
@@ -1136,16 +1567,47 @@ impl PluginManager {
             }
         }
     }
+
+    pub fn take_ui_notifications(&mut self) -> Vec<UiNotification> {
+        let mut all = Vec::new();
+        for plugin in self.plugins.values_mut() {
+            all.extend(plugin.take_ui_notifications());
+        }
+        all
+    }
+
+    pub fn pending_exec_count(&self) -> usize {
+        self.plugins
+            .values()
+            .map(|plugin| plugin.running_request_count())
+            .sum()
+    }
+
+    pub fn recent_exec_records(&self) -> Vec<PluginExecRequest> {
+        let mut records = Vec::new();
+        for plugin in self.plugins.values() {
+            records.extend(plugin.exec_history().iter().cloned());
+            records.extend(plugin.running_requests().into_iter().cloned());
+        }
+        records.sort_by_key(|r| {
+            r.started_at
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_else(|_| Duration::from_secs(0))
+                .as_nanos()
+        });
+        records
+    }
     
     /// 显示插件卡片内容
     fn show_plugin_card_content(
         ui: &mut eframe::egui::Ui,
         plugin_id: &str,
-        config: &PluginConfig,
-        status: &PluginStatus,
+        plugin: &PluginInstance,
         actions: &mut Vec<PluginAction>,
     ) {
         use eframe::egui::Color32;
+        let config = plugin.config();
+        let status = plugin.status();
         
         // 插件名称（根据当前语言显示）
         let name = config.name.get();
@@ -1200,14 +1662,14 @@ impl PluginManager {
                 actions.push(PluginAction::ShowConfig(plugin_id.to_string()));
             }
         });
+
     }
     
     /// 显示单个插件卡片
     fn show_plugin_card(
         ui: &mut eframe::egui::Ui,
         plugin_id: &str,
-        config: &PluginConfig,
-        status: &PluginStatus,
+        plugin: &PluginInstance,
         available_width: f32,
         actions: &mut Vec<PluginAction>,
     ) {
@@ -1247,7 +1709,7 @@ impl PluginManager {
                         ui.set_width(available_width - 10.0); // 减去左右内边距
                         
                         // 显示插件卡片内容
-                        Self::show_plugin_card_content(ui, plugin_id, config, status, actions);
+                        Self::show_plugin_card_content(ui, plugin_id, plugin, actions);
                     });
                 });
                 
@@ -1279,9 +1741,7 @@ impl PluginManager {
         
         for plugin_id in plugin_ids {
             if let Some(plugin) = self.plugins.get(&plugin_id) {
-                let config = plugin.config();
-                let status = plugin.status();
-                Self::show_plugin_card(ui, &plugin_id, config, status, available_width, &mut actions);
+                Self::show_plugin_card(ui, &plugin_id, plugin, available_width, &mut actions);
             }
         }
         

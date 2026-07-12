@@ -57,6 +57,7 @@ pub enum FindCmd {
     ReplaceAll,
     FindAll,
     FindNotes,
+    LiveDisplay,
 }
 
 #[derive(Clone)]
@@ -160,6 +161,7 @@ impl FindReplaceCtx {
                 FindCmd::ReplaceAll => "ReplaceAll",
                 FindCmd::FindAll => "FindAll",
                 FindCmd::FindNotes => "FindNotes",
+                FindCmd::LiveDisplay => "LiveDisplay",
             };
             params.insert("cmd".to_string(), serde_json::Value::String(cmd_str.to_string()));
         }
@@ -198,6 +200,7 @@ impl FindReplaceCtx {
                     "ReplaceAll" => Some(FindCmd::ReplaceAll),
                     "FindAll" => Some(FindCmd::FindAll),
                     "FindNotes" => Some(FindCmd::FindNotes),
+                    "LiveDisplay" => Some(FindCmd::LiveDisplay),
                     _ => None,
                 }
             });
@@ -498,6 +501,25 @@ impl Action {
             "Find and replace",
         ));
 
+        infos.insert("execute_plugin_command", ActionInfo::app_command(
+            "execute_plugin_command",
+            vec![
+                ParamInfo {
+                    name: "plugin_id",
+                    param_type: ParamType::String,
+                    required: true,
+                    description: "Plugin id",
+                },
+                ParamInfo {
+                    name: "command",
+                    param_type: ParamType::String,
+                    required: true,
+                    description: "Plugin command name",
+                },
+            ],
+            "Execute plugin command",
+        ));
+
         infos.insert("click_edit_line", ActionInfo::app_command(
             "click_edit_line",
             vec![ParamInfo {
@@ -507,6 +529,17 @@ impl Action {
                 description: "Line number",
             }],
             "Click edit line",
+        ));
+
+        infos.insert("goto_editor_line", ActionInfo::app_command(
+            "goto_editor_line",
+            vec![ParamInfo {
+                name: "line_no",
+                param_type: ParamType::Number,
+                required: true,
+                description: "Editor line number (0-based)",
+            }],
+            "Move cursor to editor line",
         ));
 
         infos.insert("open_url", ActionInfo::app_command(
@@ -749,6 +782,28 @@ impl Action {
             true, // 编辑命令
         ));
 
+        infos.insert("set_outline_content", ActionInfo::editor_action(
+            "set_outline_content",
+            None,
+            vec![
+                ParamInfo {
+                    name: "outline_path",
+                    param_type: ParamType::String,
+                    required: true,
+                    description: "Outline path (e.g. A / B / C)",
+                },
+                ParamInfo {
+                    name: "content",
+                    param_type: ParamType::String,
+                    required: true,
+                    description: "Replacement content for the outline section",
+                },
+            ],
+            Self::execute_set_outline_content,
+            "Set outline section content by outline path",
+            true, // 编辑命令
+        ));
+
         infos.insert("enter", ActionInfo::editor_action(
             "enter",
             None,
@@ -973,6 +1028,38 @@ impl Action {
             "Markdown: Table insert column right",
             true,
         ));
+        infos.insert("table_split_by_selected_cols", ActionInfo::editor_action(
+            "table_split_by_selected_cols",
+            None,
+            vec![],
+            Self::execute_table_split_by_selected_cols,
+            "Markdown: Table split by selected columns",
+            true,
+        ));
+        infos.insert("table_merge_under_current_heading", ActionInfo::editor_action(
+            "table_merge_under_current_heading",
+            None,
+            vec![],
+            Self::execute_table_merge_under_current_heading,
+            "Markdown: Table merge under current heading",
+            true,
+        ));
+        infos.insert("heading_subtree_increase", ActionInfo::editor_action(
+            "heading_subtree_increase",
+            None,
+            vec![],
+            Self::execute_heading_subtree_increase,
+            "Markdown: Increase heading levels in outline subtree",
+            true,
+        ));
+        infos.insert("heading_subtree_decrease", ActionInfo::editor_action(
+            "heading_subtree_decrease",
+            None,
+            vec![],
+            Self::execute_heading_subtree_decrease,
+            "Markdown: Decrease heading levels in outline subtree",
+            true,
+        ));
 
         // 触发器事件
         infos.insert("line_changed", ActionInfo::trigger_event(
@@ -1089,6 +1176,11 @@ impl Action {
     /// 获取动作对应的命令名（用于插件系统）
     pub fn command_name(&self) -> &str {
         &self.command
+    }
+
+    /// 是否为编辑器级 Action（在注册表中带有 executor，需在 layout 中执行）
+    pub fn is_editor_action(&self) -> bool {
+        self.info().is_some_and(|info| info.executor.is_some())
     }
 
     /// 从命令名和参数创建 Action（用于插件系统，使用注册表，带验证）
@@ -1497,6 +1589,34 @@ impl Action {
         )
     }
 
+    pub fn table_split_by_selected_cols() -> Self {
+        Self::new(
+            "table_split_by_selected_cols".to_string(),
+            std::collections::HashMap::new(),
+        )
+    }
+
+    pub fn table_merge_under_current_heading() -> Self {
+        Self::new(
+            "table_merge_under_current_heading".to_string(),
+            std::collections::HashMap::new(),
+        )
+    }
+
+    pub fn heading_subtree_increase() -> Self {
+        Self::new(
+            "heading_subtree_increase".to_string(),
+            std::collections::HashMap::new(),
+        )
+    }
+
+    pub fn heading_subtree_decrease() -> Self {
+        Self::new(
+            "heading_subtree_decrease".to_string(),
+            std::collections::HashMap::new(),
+        )
+    }
+
     // 应用级别的命令创建方法
     pub fn open_file(path: String) -> Self {
         let mut params = std::collections::HashMap::new();
@@ -1534,10 +1654,34 @@ impl Action {
         ctx.to_action()
     }
 
+    pub fn execute_plugin_command(
+        plugin_id: String,
+        command: String,
+        plugin_params: std::collections::HashMap<String, serde_json::Value>,
+    ) -> Self {
+        let mut params = std::collections::HashMap::new();
+        params.insert("plugin_id".to_string(), serde_json::Value::String(plugin_id));
+        params.insert("command".to_string(), serde_json::Value::String(command));
+        params.insert(
+            "plugin_params".to_string(),
+            serde_json::Value::Object(plugin_params.into_iter().collect()),
+        );
+        Self::new("execute_plugin_command".to_string(), params)
+    }
+
     pub fn click_edit_line(line: String) -> Self {
         let mut params = std::collections::HashMap::new();
         params.insert("line".to_string(), serde_json::Value::String(line));
         Self::new("click_edit_line".to_string(), params)
+    }
+
+    pub fn goto_editor_line(line_no: usize) -> Self {
+        let mut params = std::collections::HashMap::new();
+        params.insert(
+            "line_no".to_string(),
+            serde_json::Value::Number(serde_json::Number::from(line_no)),
+        );
+        Self::new("goto_editor_line".to_string(), params)
     }
 
     pub fn open_url(url_info: UrlInfo) -> Self {
@@ -1609,6 +1753,9 @@ impl Action {
         } else {
             // 先尝试删除自动插入的前缀
             if ctx.backspace_auto_prefix() {
+                return;
+            }
+            if ctx.backspace_remove_empty_code_block_at_document_start() {
                 return;
             }
             // 如果不需要删除前缀，执行正常的退格操作
@@ -1724,6 +1871,25 @@ impl Action {
         ctx.set_expanded_text(line_no, expanded_text);
     }
 
+    fn execute_set_outline_content(ctx: &mut Ctx, _ui: &mut Ui, action: &Action) {
+        let outline_path = match action.get_string_param("outline_path") {
+            Ok(v) => v,
+            Err(e) => {
+                log::error!("Failed to get outline_path parameter: {}", e);
+                return;
+            }
+        };
+        let content = match action.get_string_param("content") {
+            Ok(v) => v,
+            Err(e) => {
+                log::error!("Failed to get content parameter: {}", e);
+                return;
+            }
+        };
+
+        ctx.set_outline_content_by_path(&outline_path, &content);
+    }
+
     fn execute_enter(ctx: &mut Ctx, _ui: &mut Ui, action: &Action) {
         let ctrl = action.params.get("ctrl")
             .and_then(|v| v.as_bool())
@@ -1831,19 +1997,42 @@ impl Action {
         ctx.table_insert_col_right();
     }
 
+    fn execute_table_split_by_selected_cols(ctx: &mut Ctx, _ui: &mut Ui, _action: &Action) {
+        ctx.table_split_by_selected_cols();
+    }
+
+    fn execute_table_merge_under_current_heading(ctx: &mut Ctx, _ui: &mut Ui, _action: &Action) {
+        ctx.table_merge_under_current_heading();
+    }
+
+    fn execute_heading_subtree_increase(ctx: &mut Ctx, _ui: &mut Ui, _action: &Action) {
+        ctx.adjust_heading_levels_in_outline_subtree(1);
+    }
+
+    fn execute_heading_subtree_decrease(ctx: &mut Ctx, _ui: &mut Ui, _action: &Action) {
+        ctx.adjust_heading_levels_in_outline_subtree(-1);
+    }
+
     /// 执行动作（仅编辑器级别的动作）
     pub fn execute(&self, ctx: &mut Ctx, ui: &mut Ui) {
-        let _guard = ctx.merge_redo_and_undo_guard(Some(self.command.clone()));   //自动合并redo和undo命令
-        
+        let guard = ctx.merge_redo_and_undo_guard(Some(self.command.clone()));   //自动合并redo和undo命令
+
+        let action_info = self.info();
+        let is_update_action = action_info
+            .as_ref()
+            .map(|info| info.is_update)
+            .unwrap_or(false);
+
         // 统一判断 is_read_only
-        if let Some(info) = self.info() {
+        if let Some(info) = action_info.as_ref() {
             if info.is_update && ctx.cfg().is_read_only {
                 return;
             }
         }
-        
-        // 对于 Heading，需要从 params 中提取 level
-        if self.command.starts_with("heading_") {
+        let mut executed = false;
+
+        // 对于 Heading 1–6（命令名 heading_N 或带 level 的 heading_*），不要与 heading_subtree_* 混淆
+        if self.command.starts_with("heading_") && !self.command.starts_with("heading_subtree_") {
             let level = self.params.get("level")
                 .and_then(|v| v.as_u64())
                 .map(|n| n as usize)
@@ -1853,17 +2042,28 @@ impl Action {
                         .unwrap_or(1)
                 });
             Self::insert_heading(ctx, level);
-            return;
+            executed = true;
         }
         
         // 尝试使用 ActionInfo 的执行器
-        if let Some(info) = self.info() {
-            if let Some(executor) = info.executor {
-                executor(ctx, ui, self);
-                return;
+        if !executed {
+            if let Some(info) = action_info.as_ref() {
+                if let Some(executor) = info.executor {
+                    executor(ctx, ui, self);
+                    executed = true;
+                }
             }
         }
-        
+
+        drop(guard);
+        if executed && is_update_action {
+            let line_basic_changed = ctx.line_basic_changed_by_last_merged_do(self.command == "undo");
+            ctx.request_rebuild_index_if_needed(line_basic_changed);
+            let start = ctx.top_line();
+            let end = ctx.patch_end().max(start.saturating_add(1)).min(ctx.line_num());
+            ctx.rebuild_index_tick(start, end);
+        }
+
         // 应用级别的命令不在这里处理
     }
 

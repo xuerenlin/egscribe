@@ -4,6 +4,8 @@
 //! - This module intentionally keeps both IMM querying and `WM_IME_*` subclass hooks.
 //! - Different IMEs/drivers may expose different subsets of signals.
 
+#![cfg_attr(not(windows), allow(dead_code))]
+
 #[cfg(windows)]
 use std::sync::{Mutex, OnceLock};
 #[cfg(windows)]

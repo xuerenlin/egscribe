@@ -38,7 +38,7 @@ for plugin_dir in plugins/*/; do
     fi
     
     plugin_name=$(basename "$plugin_dir")
-    if [ "$plugin_name" = "plugin_sdk" ]; then
+    if [ "$plugin_name" = "plugin_sdk" ] || [ "$plugin_name" = "sitter" ]; then
         echo "  Skipping internal crate: $plugin_name"
         continue
     fi
@@ -116,6 +116,15 @@ for plugin_dir in plugins/*/; do
             cp "$plugin_desc_file" "$plugin_desc_dst"
             echo "  ✓ Created desc.json for Rust plugin: $plugin_name"
         fi
+
+        # 复制 markdown 资源文件（如 prompt 模板）
+        for file in "$plugin_dir"/*.md; do
+            if [ -f "$file" ] && [[ "$file" != *.example ]]; then
+                filename=$(basename "$file")
+                cp "$file" "$plugin_dst_dir/$filename"
+                echo "  ✓ Copied markdown resource: $filename"
+            fi
+        done
     fi
 done
 

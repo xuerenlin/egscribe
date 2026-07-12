@@ -27,6 +27,18 @@ fn enter_ctrl_at_end_of_single_line() {
 }
 
 #[test]
+fn enter_ctrl_inside_table_inserts_after_table_block() {
+    let mut ctx = md_ctx("| a | b |\n| --- | --- |\n| x | y |\n| p | q |");
+    let (line_no, _) = find_table_data_row_line_last_col(&ctx, 'x');
+    set_caret_line_segment0(&mut ctx, line_no, 1);
+    assert_action_with_undo_redo(
+        &mut ctx,
+        &Action::enter(true),
+        "|a|b|\n|--|--|\n|x|y|\n|p|q|\n",
+    );
+}
+
+#[test]
 fn enter_normal_inside_fenced_code_body() {
     let mut ctx = md_ctx("```\nbody\n```");
     let ln = (0..ctx.line_num())

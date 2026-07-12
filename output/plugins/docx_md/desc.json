@@ -1,0 +1,44 @@
+{
+  "id": "docx_md",
+  "name": {
+    "zh-CN": "大纲导出 Word",
+    "en-US": "Export outline to DOCX"
+  },
+  "description": {
+    "zh-CN": "将当前大纲 Markdown 导出为 Word（基于同目录 templ.docx 模板）。",
+    "en-US": "Exports current outline Markdown to Word using templ.docx beside the plugin."
+  },
+  "exe_path": "docx_md/docx_md",
+  "args": [],
+  "config": {
+    "template_file": "templ.docx",
+    "style_map": {},
+    "table_style_id": "",
+    "plantuml_export_code": false,
+    "export_tables": false
+  },
+  "enabled": true,
+  "auto_start": true,
+  "triggers": [],
+  "commands": [
+    {
+      "command": "export_outline_to_docx",
+      "extensions": ["md"]
+    }
+  ],
+  "context_menus": [
+    {
+      "name": {
+        "zh-CN": "导出当前段落到Word",
+        "en-US": "Export outline to Word"
+      },
+      "command": "export_outline_to_docx",
+      "sort_value": 100,
+      "supports_batch_concurrent": false,
+      "params": {
+        "current_outline_content": "$current_outline_content",
+        "new_file_path": "$new_file_path"
+      }
+    }
+  ]
+}

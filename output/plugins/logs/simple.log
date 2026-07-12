@@ -1,14 +1,63 @@
 # 插件日志: simple
-2026-04-16 08:09:13.776 [i Info] Loaded plugin config from E:\rustspace\egscribe\output\plugins\simple\desc.json
-2026-04-16 08:09:13.776 [i Info] Starting plugin 'simple' from E:\rustspace\egscribe\output\plugins\simple/simple.exe
-2026-04-16 08:09:13.784 [→ Send] Sending init request to plugin 'simple'
-2026-04-16 08:09:13.816 [i Info] Plugin 'simple' initialized successfully
-2026-04-16 08:09:14.811 [← Receive] Receive Plugin Message: Event(Ready { name: "Simple Plugin", version: "0.1.0", capabilities: ["echo", "greet"] })
-2026-04-16 08:09:18.821 [i Info] Stop requested by user
-2026-04-16 08:09:18.822 [i Info] Stop completed
-2026-04-16 08:09:42.729 [i Info] Start requested by user
-2026-04-16 08:09:42.730 [i Info] Starting plugin 'simple' from E:\rustspace\egscribe\output\plugins\simple/simple.exe
-2026-04-16 08:09:42.736 [→ Send] Sending init request to plugin 'simple'
-2026-04-16 08:09:42.767 [i Info] Plugin 'simple' initialized successfully
-2026-04-16 08:09:42.767 [i Info] Start completed
-2026-04-16 08:09:42.770 [← Receive] Receive Plugin Message: Event(Ready { name: "Simple Plugin", version: "0.1.0", capabilities: ["echo", "greet"] })
+2026-04-27 15:31:45.769 [i Info] Loaded plugin config from E:\rustspace\egscribe\output\plugins\simple\desc.json
+2026-04-27 15:31:45.769 [i Info] Starting plugin 'simple' from E:\rustspace\egscribe\output\plugins\simple/simple
+2026-04-27 15:31:45.777 [→ Send] Sending init request to plugin 'simple'
+2026-04-27 15:31:45.819 [i Info] Plugin 'simple' initialized successfully
+2026-04-27 15:31:46.965 [← Receive] Receive Plugin Message: Event(Ready { name: "Simple Plugin", version: "0.1.0", capabilities: ["echo", "greet"] })
+2026-04-27 15:32:29.048 [→ Send] Send notify event: line_changed, Request(Notify { id: "notify_line_changed_1777303949048494800", event_type: "line_changed", data: {"line_no": Number(12), "line_text": String("# Test2")} })
+2026-04-27 15:32:29.048 [→ Send] Send notify event: line_changed, Request(Notify { id: "notify_line_changed_1777303949048868000", event_type: "line_changed", data: {"line_text": String(""), "line_no": Number(13)} })
+2026-04-27 15:32:29.082 [← Receive] Receive Plugin Message: Event(Notify { level: "info", message: "Received line_changed event: line 12 = '# Test2'" })
+2026-04-27 15:32:29.082 [← Receive] Receive Plugin Message: Response(PluginResponse { id: "notify_line_changed_1777303949048494800", success: true, data: Some(Object {"event_type": String("line_changed"), "handled": Bool(true)}), error: None })
+2026-04-27 15:32:29.082 [← Receive] Receive Plugin Message: Event(Notify { level: "info", message: "Received line_changed event: line 13 = ''" })
+2026-04-27 15:32:29.082 [← Receive] Receive Plugin Message: Response(PluginResponse { id: "notify_line_changed_1777303949048868000", success: true, data: Some(Object {"event_type": String("line_changed"), "handled": Bool(true)}), error: None })
+2026-04-27 15:32:29.978 [→ Send] Send notify event: line_changed, Request(Notify { id: "notify_line_changed_1777303949978733000", event_type: "line_changed", data: {"line_text": String("#"), "line_no": Number(13)} })
+2026-04-27 15:32:29.979 [← Receive] Receive Plugin Message: Event(Notify { level: "info", message: "Received line_changed event: line 13 = '#'" })
+2026-04-27 15:32:29.979 [← Receive] Receive Plugin Message: Response(PluginResponse { id: "notify_line_changed_1777303949978733000", success: true, data: Some(Object {"event_type": String("line_changed"), "handled": Bool(true)}), error: None })
+2026-04-27 15:32:30.182 [→ Send] Send notify event: line_changed, Request(Notify { id: "notify_line_changed_1777303950182145000", event_type: "line_changed", data: {"line_no": Number(13), "line_text": String("##")} })
+2026-04-27 15:32:30.182 [← Receive] Receive Plugin Message: Event(Notify { level: "info", message: "Received line_changed event: line 13 = '##'" })
+2026-04-27 15:32:30.182 [← Receive] Receive Plugin Message: Response(PluginResponse { id: "notify_line_changed_1777303950182145000", success: true, data: Some(Object {"event_type": String("line_changed"), "handled": Bool(true)}), error: None })
+2026-04-27 15:32:30.349 [→ Send] Send notify event: line_changed, Request(Notify { id: "notify_line_changed_1777303950349848800", event_type: "line_changed", data: {"line_no": Number(13), "line_text": String("## ")} })
+2026-04-27 15:32:30.350 [← Receive] Receive Plugin Message: Event(Notify { level: "info", message: "Received line_changed event: line 13 = '## '" })
+2026-04-27 15:32:30.350 [← Receive] Receive Plugin Message: Response(PluginResponse { id: "notify_line_changed_1777303950349848800", success: true, data: Some(Object {"event_type": String("line_changed"), "handled": Bool(true)}), error: None })
+2026-04-27 15:32:31.951 [→ Send] Send notify event: line_changed, Request(Notify { id: "notify_line_changed_1777303951951319600", event_type: "line_changed", data: {"line_text": String("## Test"), "line_no": Number(13)} })
+2026-04-27 15:32:31.951 [← Receive] Receive Plugin Message: Event(Notify { level: "info", message: "Received line_changed event: line 13 = '## Test'" })
+2026-04-27 15:32:31.951 [← Receive] Receive Plugin Message: Response(PluginResponse { id: "notify_line_changed_1777303951951319600", success: true, data: Some(Object {"event_type": String("line_changed"), "handled": Bool(true)}), error: None })
+2026-04-27 15:32:33.344 [→ Send] Send notify event: line_changed, Request(Notify { id: "notify_line_changed_1777303953344771300", event_type: "line_changed", data: {"line_no": Number(13), "line_text": String("## Testh")} })
+2026-04-27 15:32:33.376 [← Receive] Receive Plugin Message: Event(Notify { level: "info", message: "Received line_changed event: line 13 = '## Testh'" })
+2026-04-27 15:32:33.376 [← Receive] Receive Plugin Message: Response(PluginResponse { id: "notify_line_changed_1777303953344771300", success: true, data: Some(Object {"event_type": String("line_changed"), "handled": Bool(true)}), error: None })
+2026-04-27 15:32:33.439 [→ Send] Send notify event: line_changed, Request(Notify { id: "notify_line_changed_1777303953439264100", event_type: "line_changed", data: {"line_no": Number(13), "line_text": String("## Testhe")} })
+2026-04-27 15:32:33.469 [← Receive] Receive Plugin Message: Event(Notify { level: "info", message: "Received line_changed event: line 13 = '## Testhe'" })
+2026-04-27 15:32:33.469 [← Receive] Receive Plugin Message: Response(PluginResponse { id: "notify_line_changed_1777303953439264100", success: true, data: Some(Object {"event_type": String("line_changed"), "handled": Bool(true)}), error: None })
+2026-04-27 15:32:33.580 [→ Send] Send notify event: line_changed, Request(Notify { id: "notify_line_changed_1777303953580237300", event_type: "line_changed", data: {"line_text": String("## Testhel"), "line_no": Number(13)} })
+2026-04-27 15:32:33.610 [← Receive] Receive Plugin Message: Event(Notify { level: "info", message: "Received line_changed event: line 13 = '## Testhel'" })
+2026-04-27 15:32:33.610 [← Receive] Receive Plugin Message: Response(PluginResponse { id: "notify_line_changed_1777303953580237300", success: true, data: Some(Object {"event_type": String("line_changed"), "handled": Bool(true)}), error: None })
+2026-04-27 15:32:33.778 [→ Send] Send notify event: line_changed, Request(Notify { id: "notify_line_changed_1777303953778274500", event_type: "line_changed", data: {"line_no": Number(13), "line_text": String("## Testhell")} })
+2026-04-27 15:32:33.778 [← Receive] Receive Plugin Message: Event(Notify { level: "info", message: "Received line_changed event: line 13 = '## Testhell'" })
+2026-04-27 15:32:33.778 [← Receive] Receive Plugin Message: Response(PluginResponse { id: "notify_line_changed_1777303953778274500", success: true, data: Some(Object {"event_type": String("line_changed"), "handled": Bool(true)}), error: None })
+2026-04-27 15:32:34.206 [→ Send] Send notify event: line_changed, Request(Notify { id: "notify_line_changed_1777303954206419300", event_type: "line_changed", data: {"line_text": String("## Testhel"), "line_no": Number(13)} })
+2026-04-27 15:32:34.206 [← Receive] Receive Plugin Message: Event(Notify { level: "info", message: "Received line_changed event: line 13 = '## Testhel'" })
+2026-04-27 15:32:34.206 [← Receive] Receive Plugin Message: Response(PluginResponse { id: "notify_line_changed_1777303954206419300", success: true, data: Some(Object {"event_type": String("line_changed"), "handled": Bool(true)}), error: None })
+2026-04-27 15:32:34.377 [→ Send] Send notify event: line_changed, Request(Notify { id: "notify_line_changed_1777303954377422200", event_type: "line_changed", data: {"line_no": Number(13), "line_text": String("## Testhe")} })
+2026-04-27 15:32:34.377 [← Receive] Receive Plugin Message: Event(Notify { level: "info", message: "Received line_changed event: line 13 = '## Testhe'" })
+2026-04-27 15:32:34.377 [← Receive] Receive Plugin Message: Response(PluginResponse { id: "notify_line_changed_1777303954377422200", success: true, data: Some(Object {"event_type": String("line_changed"), "handled": Bool(true)}), error: None })
+2026-04-27 15:32:34.550 [→ Send] Send notify event: line_changed, Request(Notify { id: "notify_line_changed_1777303954550503600", event_type: "line_changed", data: {"line_no": Number(13), "line_text": String("## Testh")} })
+2026-04-27 15:32:34.579 [← Receive] Receive Plugin Message: Event(Notify { level: "info", message: "Received line_changed event: line 13 = '## Testh'" })
+2026-04-27 15:32:34.579 [← Receive] Receive Plugin Message: Response(PluginResponse { id: "notify_line_changed_1777303954550503600", success: true, data: Some(Object {"event_type": String("line_changed"), "handled": Bool(true)}), error: None })
+2026-04-27 15:32:34.729 [→ Send] Send notify event: line_changed, Request(Notify { id: "notify_line_changed_1777303954729795400", event_type: "line_changed", data: {"line_text": String("## Test"), "line_no": Number(13)} })
+2026-04-27 15:32:34.763 [← Receive] Receive Plugin Message: Event(Notify { level: "info", message: "Received line_changed event: line 13 = '## Test'" })
+2026-04-27 15:32:34.763 [← Receive] Receive Plugin Message: Response(PluginResponse { id: "notify_line_changed_1777303954729795400", success: true, data: Some(Object {"event_type": String("line_changed"), "handled": Bool(true)}), error: None })
+2026-04-27 15:32:34.935 [→ Send] Send notify event: line_changed, Request(Notify { id: "notify_line_changed_1777303954935369400", event_type: "line_changed", data: {"line_text": String("## Test "), "line_no": Number(13)} })
+2026-04-27 15:32:34.969 [← Receive] Receive Plugin Message: Event(Notify { level: "info", message: "Received line_changed event: line 13 = '## Test '" })
+2026-04-27 15:32:34.969 [← Receive] Receive Plugin Message: Response(PluginResponse { id: "notify_line_changed_1777303954935369400", success: true, data: Some(Object {"event_type": String("line_changed"), "handled": Bool(true)}), error: None })
+2026-04-27 15:32:35.251 [→ Send] Send notify event: line_changed, Request(Notify { id: "notify_line_changed_1777303955250987600", event_type: "line_changed", data: {"line_no": Number(13), "line_text": String("## Test H")} })
+2026-04-27 15:32:35.251 [← Receive] Receive Plugin Message: Event(Notify { level: "info", message: "Received line_changed event: line 13 = '## Test H'" })
+2026-04-27 15:32:35.251 [← Receive] Receive Plugin Message: Response(PluginResponse { id: "notify_line_changed_1777303955250987600", success: true, data: Some(Object {"event_type": String("line_changed"), "handled": Bool(true)}), error: None })
+2026-04-27 15:32:35.706 [→ Send] Send notify event: line_changed, Request(Notify { id: "notify_line_changed_1777303955706726700", event_type: "line_changed", data: {"line_text": String("## Test He"), "line_no": Number(13)} })
+2026-04-27 15:32:35.743 [← Receive] Receive Plugin Message: Event(Notify { level: "info", message: "Received line_changed event: line 13 = '## Test He'" })
+2026-04-27 15:32:35.743 [← Receive] Receive Plugin Message: Response(PluginResponse { id: "notify_line_changed_1777303955706726700", success: true, data: Some(Object {"event_type": String("line_changed"), "handled": Bool(true)}), error: None })
+2026-04-27 15:32:35.855 [→ Send] Send notify event: line_changed, Request(Notify { id: "notify_line_changed_1777303955855155700", event_type: "line_changed", data: {"line_text": String("## Test Her"), "line_no": Number(13)} })
+2026-04-27 15:32:35.893 [← Receive] Receive Plugin Message: Event(Notify { level: "info", message: "Received line_changed event: line 13 = '## Test Her'" })
+2026-04-27 15:32:35.893 [← Receive] Receive Plugin Message: Response(PluginResponse { id: "notify_line_changed_1777303955855155700", success: true, data: Some(Object {"event_type": String("line_changed"), "handled": Bool(true)}), error: None })
+2026-04-27 15:32:35.970 [→ Send] Send notify event: line_changed, Request(Notify { id: "notify_line_changed_1777303955970944800", event_type: "line_changed", data: {"line_text": String("## Test Here"), "line_no": Number(13)} })
+2026-04-27 15:32:36.010 [← Receive] Receive Plugin Message: Event(Notify { level: "info", message: "Received line_changed event: line 13 = '## Test Here'" })
+2026-04-27 15:32:36.010 [← Receive] Receive Plugin Message: Response(PluginResponse { id: "notify_line_changed_1777303955970944800", success: true, data: Some(Object {"event_type": String("line_changed"), "handled": Bool(true)}), error: None })

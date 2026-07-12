@@ -10,6 +10,9 @@ pub struct FindWindow {
     need_focus: bool,
     replace_ready: bool,
     is_open_replace: bool,
+    is_live_display: bool,
+    need_clear_filter: bool,
+    last_live_trigger: FindReplaceCtx,
     param: FindReplaceCtx,
     pub find_file: Option<UniFile>,
     pub edit_ctx: Ctx,
@@ -27,6 +30,9 @@ impl FindWindow {
             need_focus: false,
             replace_ready: false,
             is_open_replace: false,
+            is_live_display: false,
+            need_clear_filter: false,
+            last_live_trigger: FindReplaceCtx::new(),
             param: FindReplaceCtx::new(),
             find_file: None,
             edit_ctx,
@@ -82,6 +88,23 @@ impl FindWindow {
         self.find_file = Some(find_file);
     }
 
+    pub fn drain_clear_filter(&mut self) -> bool {
+        std::mem::take(&mut self.need_clear_filter)
+    }
+
+    fn live_filter_changed(&self) -> bool {
+        self.param.find != self.last_live_trigger.find
+            || self.param.is_case != self.last_live_trigger.is_case
+            || self.param.is_hole_word != self.last_live_trigger.is_hole_word
+            || self.param.is_reg != self.last_live_trigger.is_reg
+    }
+
+    fn live_display_param(&self) -> FindReplaceCtx {
+        let mut ctx = self.param.clone();
+        ctx.cmd = Some(FindCmd::LiveDisplay);
+        ctx
+    }
+
     pub fn show_content(&mut self, ui: &mut Ui) -> Option<FindReplaceCtx> {
         let mut param = None;
 
@@ -98,6 +121,19 @@ impl FindWindow {
             let regex_button = Button::new("/.*/").selected(self.param.is_reg).corner_radius(3.0);
             if regex_button.ui(ui).clicked() {
                 self.param.is_reg = !self.param.is_reg;
+            }
+
+            let live_button = Button::new(tr("find.live_display"))
+                .selected(self.is_live_display)
+                .corner_radius(3.0);
+            if live_button.ui(ui).clicked() {
+                self.is_live_display = !self.is_live_display;
+                if self.is_live_display {
+                    param = Some(self.live_display_param());
+                    self.last_live_trigger = self.param.clone();
+                } else {
+                    self.need_clear_filter = true;
+                }
             }
 
             ui.separator();
@@ -175,6 +211,11 @@ impl FindWindow {
             });
         }
 
+        if param.is_none() && self.is_live_display && self.live_filter_changed() {
+            param = Some(self.live_display_param());
+            self.last_live_trigger = self.param.clone();
+        }
+
         param
     }
 
@@ -208,6 +249,7 @@ impl FindWindow {
             return None;
         }
 
+        let was_show = self.is_show;
         let size = Vec2::new(380.0, 200.0);
         let mut rect = Rect::from_min_size(ui.cursor().left_top(), size);
         if let Some(pointer_pos) = ui.ctx().pointer_interact_pos() {
@@ -226,6 +268,10 @@ impl FindWindow {
                 param = self.show_all(ui);
             }
         );
+        if was_show && !is_show {
+            self.is_live_display = false;
+            self.need_clear_filter = true;
+        }
         self.is_show = is_show;
         param
     }

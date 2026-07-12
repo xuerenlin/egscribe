@@ -1,10 +1,14 @@
 [workspace]
 members = [
     ".",
+    "plugins/sitter",
     "plugins/plugin_sdk",
     "plugins/simple",
     "plugins/cal",
-    "plugins/xlsx2md",
+    "plugins/xlsx_md",
+    "plugins/docx_md",
+    "plugins/llm_agent",
+    "plugins/beauty_format",
 ]
 resolver = "2"
 
@@ -17,6 +21,14 @@ license = "MIT"
 edition = "2021"
 rust-version = "1.76"
 publish = false
+
+[build-dependencies]
+chrono = "0.4"
+
+[target.'cfg(windows)'.build-dependencies]
+embed-resource = "2.5"
+ico = "0.4"
+image = "0.25.6"
 
 [dependencies]
 
@@ -44,6 +56,7 @@ chardetng = "0.1"
 rfd = "0.14"
 chrono = "0.4"
 raw-window-handle = "0.6"
+egscribe_sitter = { path = "plugins/sitter" }
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.54", features = [
@@ -53,44 +66,8 @@ windows = { version = "0.54", features = [
     "Win32_UI_TextServices",
     "Win32_UI_WindowsAndMessaging",
     "Win32_Globalization",
+    "Win32_Graphics_Dwm",
 ] }
-
-# 
-# tree-sitter
-#
-tree-sitter = "0.20.10"
-tree-sitter-highlight = "0.20.1"
-tree-sitter-javascript = "0.20.4"
-tree-sitter-c = "0.20.8"
-tree-sitter-rust = "0.20.4"
-tree-sitter-go = "0.20.0"
-tree-sitter-bash = "0.20.5"
-tree-sitter-json = "0.20.2"
-tree-sitter-python = "0.20.4"
-tree-sitter-java = "0.20.2"
-tree-sitter-cpp = "0.20.3"
-tree-sitter-php = "0.20.0"
-tree-sitter-ruby = "0.20.0" 
-tree-sitter-scala = "0.20.*"
-tree-sitter-typescript = "0.20.5"
-tree-sitter-html = "0.19.0"
-# tree-sitter-css = "0.19.0"
-tree-sitter-toml = "0.20.0"
-tree-sitter-ocaml = "0.20.0"
-
-# tree-sitter-md = "0.3.2"
-# tree-sitter-yaml = "0.7.0"
-# tree-sitter-lua = "0.20.*"
-# tree-sitter-kotlin = "0.3.8"
-# tree-sitter-swift = "0.20.*"
-# tree-sitter-dart = "0.20.*"
-# tree-sitter-elixir = "0.20.*"
-# tree-sitter-clojure = "0.20.*" 
-# tree-sitter-haskell = "0.20.*"
-# tree-sitter-fsharp = "0.20.*"
-# tree-sitter-nim = "0.20.*"
-# tree-sitter-zig = "0.20.*"
-# tree-sitter-v = "0.20.*"
 
 [dev-dependencies]
 egui = "0.33.2"

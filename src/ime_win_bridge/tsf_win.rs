@@ -6,6 +6,8 @@
 //! - In that case we fallback to `ITfUIElementSink` lifecycle (`UI_BEGIN/UI_END`) as
 //!   an approximation of "IME preedit UI is currently active".
 
+#![cfg_attr(not(windows), allow(dead_code))]
+
 #[cfg(windows)]
 use std::cell::RefCell;
 #[cfg(windows)]

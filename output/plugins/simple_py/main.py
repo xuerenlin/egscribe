@@ -116,16 +116,8 @@ def handle_shutdown(request_id: str) -> None:
 def handle_notify(request_id: str, event_type: str, data: Dict[str, Any]) -> None:
     """处理通知事件（来自主程序的事件通知）"""
     if event_type == "line_changed":
-        # 处理行内容变化事件
-        line_no = data.get("line_no", 0)
-        line_text = data.get("line_text", "")
-        
-        # 截断过长的文本
-        preview = line_text[:50] + "..." if len(line_text) > 50 else line_text
-        
-        send_event("notify", 
-                  level="info", 
-                  message=f"Received line_changed event: line {line_no} = '{preview}'")
+        # 行变化事件不再发送通知，避免高频刷屏
+        pass
         
     elif event_type == "file_opened":
         # 处理文件打开事件

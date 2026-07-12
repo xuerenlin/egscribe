@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::ops::Range;
 
-use crate::medit::{CodeInfo, ImageInfo, PghView, TableInfo};
+use crate::medit::{ImageInfo, PghView};
 use crate::medit::pgh::PghType;
 use crate::uicom::IconName;
 use eframe::egui::epaint::text::{LayoutJob, TextFormat};
@@ -100,6 +100,7 @@ impl<'a> MarkDownImpl<'a> {
         Self::new(s, true, None, false, cfg)
     }
 
+    #[allow(dead_code)]
     pub fn extract_prefix_and_indent(text: &str) -> (String, usize, String) {
         Self::extract_prefix_and_indent_impl(text)
     }
@@ -145,7 +146,7 @@ impl<'a> MarkDownImpl<'a> {
             if ch == '-' || ch == '*' || ch == '+' || ch == '>' {
                 true
             } else if ch.is_ascii_digit() { //123.
-                let num_start = pos;
+                let _num_start = pos;
                 let mut check_pos = pos;
                 while check_pos < chars.len() && chars[check_pos].is_ascii_digit() {
                     check_pos += 1;
@@ -169,9 +170,7 @@ impl<'a> MarkDownImpl<'a> {
         if self.prefix.is_empty() {
             return;
         }
-        if pghview.pgh_type == PghType::Table
-            || pghview.pgh_type == PghType::TableRow
-            || pghview.pgh_type == PghType::CodeRow
+        if pghview.pgh_type == PghType::TableRow || pghview.pgh_type == PghType::CodeRow
         {
             return;
         }
@@ -190,14 +189,6 @@ impl<'a> MarkDownImpl<'a> {
         let mut format = TextFormat::default();
         format.font_id.size = self.cfg.font_size;
         format.font_id.family = self.cfg.font_family();
-        format.color = self.cfg.text_color();
-        format
-    }
-
-    fn format_code(&self) -> TextFormat {
-        let mut format = TextFormat::default();
-        format.font_id.size = self.cfg.font_size;
-        format.font_id.family = FontFamily::Monospace; // Code blocks always use monospace
         format.color = self.cfg.text_color();
         format
     }
@@ -272,18 +263,6 @@ impl<'a> MarkDownImpl<'a> {
         format.color = self.cfg.link_color();
     }
 
-    fn text_between_pos(&self, p1: Option<&Position>, p2: Option<&Position>) -> String {
-        if let Some(pos1) = p1 {
-            if let Some(pos2) = p2 {
-                if pos2.start.offset > pos1.start.offset {
-                    let ctrl = &self.text[pos1.start.offset..pos2.start.offset];
-                    return ctrl.to_string();
-                }
-            }
-        }
-        "".to_string()
-    }
-
     fn node_text(&self, node: &Node) -> &str {
         if let Some(p) = node.position() {
             &self.text[p.start.offset..p.end.offset]
@@ -312,7 +291,7 @@ impl<'a> MarkDownImpl<'a> {
     }
 
     fn text_check_double_link(&self, node: &Node, job: &mut LayoutJob, link_ends: &mut Vec<LinkEnd>, format: &mut TextFormat) {
-        if let Node::Text(text) = node {
+        if let Node::Text(_text) = node {
             let text_value = self.node_text(node);
             let info = self.text_double_links(text_value);
             if info.is_empty() {
@@ -353,7 +332,7 @@ impl<'a> MarkDownImpl<'a> {
     fn format_inlinecode_node(
         &self,
         node: &Node,
-        parent_pos: Option<&Position>,
+        _parent_pos: Option<&Position>,
         job: &mut LayoutJob,
         format: &mut TextFormat,
     ) {
@@ -402,7 +381,7 @@ impl<'a> MarkDownImpl<'a> {
         //add value and childrens
         if self.node_children_count(node) == 0 {
             match node {
-                Node::Text(text) => {
+                Node::Text(_text) => {
                     //job.append(&text.value, 0.0, format.clone());
                     self.text_check_double_link(node, job, link_ends, format);
                 }
@@ -509,7 +488,7 @@ impl<'a> MarkDownImpl<'a> {
         let mut job: LayoutJob = LayoutJob::default();
         let mut link_ends = vec![];
         let mut format = format;
-        if let Some(pos) = node.position() {
+        if let Some(_pos) = node.position() {
             self.paragraph_format(node, None, false, false, &mut job, &mut link_ends, &mut format);
             //let total_s = &self.text[pos.start.offset..pos.end.offset];
             let total_s = &job.text;
@@ -566,6 +545,7 @@ impl<'a> MarkDownImpl<'a> {
         }
         let mut pghview = PghView::new_heading();
         self.paragraph_push_to_pghview(node, self.format_head(depth), &mut pghview);
+        pghview.heading_level = Some(depth.clamp(1, 6) as u8);
         pghview.spacing_top = self.cfg.spacing.heading.top;
         pghview.spacing_bottom = self.cfg.spacing.heading.bottom;
         pghview
@@ -585,7 +565,7 @@ impl<'a> MarkDownImpl<'a> {
                                 self.format_delete(&mut format);
                             }
                         } else {
-                            let listordered = list.ordered;
+                            let _listordered = list.ordered;
                             pghview.push_point();
                         }
                     }
@@ -602,10 +582,11 @@ impl<'a> MarkDownImpl<'a> {
     fn blockquote_to_pghview(&self, node: &Node) -> PghView {
         let mut pghview = PghView::new_block_line();
         if let Some(items) = node.children() {
-            if let Some(list_node) = items.first() {
+            if let Some(_list_node) = items.first() {
                 pghview.push_quote_indent();
-
-                self.paragraph_push_to_pghview(node, self.format_default(), &mut pghview);
+                let mut format = self.format_default();
+                self.format_italics(&mut format);
+                self.paragraph_push_to_pghview(node, format, &mut pghview);
             } else {
                 let s = self.node_text(node);
                 pghview.push_text(s.to_string(), None);
@@ -616,7 +597,7 @@ impl<'a> MarkDownImpl<'a> {
 
     fn thematicbreak_to_pghview(&self, node: &Node) -> PghView {
         let mut pghview = PghView::new_break_line();
-        let s = self.node_text(node);
+        let _s = self.node_text(node);
         //pghview.push_text(s.to_string(), None);
         self.paragraph_push_to_pghview(node, self.format_default(), &mut pghview);
         pghview.push_break();
@@ -624,66 +605,24 @@ impl<'a> MarkDownImpl<'a> {
     }
 
     fn table_to_pghview(&self, node: &Node) -> PghView {
-        let mut table_info = TableInfo::default();
-        table_info.frame_style = self.cfg.table_frame_style.clone();
-        let mut data: Vec<Vec<LayoutJob>> = vec![];
-        if let Some(table) = node.children() {
-            for row in table {
-                if let Some(cols) = row.children() {
-                    table_info.row_count += 1;
-                    let mut row_data = vec![];
-                    let mut col_count = 0;
-                    for col in cols {
-                        let mut job: LayoutJob = LayoutJob::default();
-                        let mut link_ends = vec![];
-                        let mut format = self.format_default();
-                        if let Some(children) = col.children() {
-                            for (i, child) in children.iter().enumerate() {
-                                let is_first = i == 0;
-                                let is_last = i + 1 == children.len();
-                                self.paragraph_format(child, None, is_first, is_last, &mut job, &mut link_ends, &mut format);
-                            }
-                        }
-                        col_count += 1;
-                        row_data.push(job);
-                    }
-                    if col_count > table_info.col_count {
-                        table_info.col_count = col_count;
-                    }
-                    data.push(row_data);
-                }
-            }
-        }
-
-        let mut pghview = PghView::new_table();
-        for r in 0..table_info.row_count {
-            for c in 0..table_info.col_count {
-                if let Some(row) = data.get(r) {
-                    if let Some(cell_job) = row.get(c) {
-                        pghview.push_text(cell_job.text.clone(), Some(cell_job.clone()));
-                    } else {
-                        pghview.push_text("".to_string(), None);
-                    }
-                }
-            }
-        }
-        table_info.table_total_rows = table_info.row_count;
-        table_info.table_row_index = 0;
-        pghview.table_info = Some(table_info);
-        pghview
+        // `markdown_to_pghview` 仅返回单行，表格场景下取第一行 `TableRow` 作为降级表示。
+        self.table_to_table_row_pghviews(node)
+            .into_iter()
+            .next()
+            .unwrap_or_else(PghView::new_text)
     }
 
     /// 将 AST 表格展开为每行一个 `PghType::TableRow`（用于 `markdown_to_pgh_texts` / 管道块合并）
     pub(crate) fn table_to_table_row_pghviews(&self, node: &Node) -> Vec<PghView> {
-        let mut table_info = TableInfo::default();
-        table_info.frame_style = self.cfg.table_frame_style.clone();
         let mut data: Vec<Vec<LayoutJob>> = vec![];
+        let mut row_count = 0usize;
+        let mut col_count = 0usize;
         if let Some(table) = node.children() {
             for row in table {
                 if let Some(cols) = row.children() {
-                    table_info.row_count += 1;
+                    row_count += 1;
                     let mut row_data = vec![];
-                    let mut col_count = 0;
+                    let mut row_col_count = 0;
                     for col in cols {
                         let mut job: LayoutJob = LayoutJob::default();
                         let mut link_ends = vec![];
@@ -703,26 +642,22 @@ impl<'a> MarkDownImpl<'a> {
                                 );
                             }
                         }
-                        col_count += 1;
+                        row_col_count += 1;
                         row_data.push(job);
                     }
-                    if col_count > table_info.col_count {
-                        table_info.col_count = col_count;
+                    if row_col_count > col_count {
+                        col_count = row_col_count;
                     }
                     data.push(row_data);
                 }
             }
         }
 
-        let total = table_info.row_count;
+        let total = row_count;
         let mut out = Vec::with_capacity(total);
         for r in 0..total {
             let mut pghview = PghView::new_table_row();
-            let mut row_ti = table_info.clone();
-            row_ti.row_count = 1;
-            row_ti.table_row_index = r;
-            row_ti.table_total_rows = total;
-            for c in 0..row_ti.col_count {
+            for c in 0..col_count {
                 if let Some(row) = data.get(r) {
                     if let Some(cell_job) = row.get(c) {
                         pghview.push_text(cell_job.text.clone(), Some(cell_job.clone()));
@@ -731,10 +666,21 @@ impl<'a> MarkDownImpl<'a> {
                     }
                 }
             }
-            pghview.table_info = Some(row_ti);
             out.push(pghview);
         }
         out
+    }
+
+    /// 从围栏 info 行还原语言 id：复制/导出时可能为 `plantuml file://...`，高亮与缓存需纯 `plantuml`。
+    fn store_code_lang_from_fence(code_lang: &Option<String>) -> Option<String> {
+        let s = code_lang.as_ref()?.trim();
+        if s.is_empty() {
+            return None;
+        }
+        if let Some(i) = s.find(" file://") {
+            return Some(s[..i].to_string());
+        }
+        Some(s.to_string())
     }
 
     /// 将 `Code` 节点展开为多行 `PghType::CodeRow`（与 `table_to_table_row_pghviews` 对称）
@@ -758,12 +704,8 @@ impl<'a> MarkDownImpl<'a> {
         for (r, line) in lines.iter().enumerate() {
             let mut pghview = PghView::new_code_row();
             pghview.push_text((*line).to_string(), None);
-            pghview.code_info = Some(CodeInfo {
-                code_row_index: r,
-                code_total_rows: total,
-            });
             if r == 0 {
-                pghview.code_lang = code.lang.clone();
+                pghview.code_lang = Self::store_code_lang_from_fence(&code.lang);
                 pghview.spacing_top = top;
             } else {
                 pghview.spacing_top = 0.0;
@@ -778,11 +720,7 @@ impl<'a> MarkDownImpl<'a> {
         if out.is_empty() {
             let mut pghview = PghView::new_code_row();
             pghview.push_text(String::new(), None);
-            pghview.code_info = Some(CodeInfo {
-                code_row_index: 0,
-                code_total_rows: 1,
-            });
-            pghview.code_lang = code.lang.clone();
+            pghview.code_lang = Self::store_code_lang_from_fence(&code.lang);
             pghview.spacing_top = top;
             pghview.spacing_bottom = bottom;
             out.push(pghview);
@@ -804,10 +742,6 @@ impl<'a> MarkDownImpl<'a> {
         let full_body: String = rows.iter().map(PghView::get_text).collect::<Vec<_>>().join("\n");
         merged.pgh.clear();
         merged.push_text(full_body, None);
-        if let Some(ci) = merged.code_info.as_mut() {
-            ci.code_row_index = 0;
-            ci.code_total_rows = 1;
-        }
         merged.spacing_bottom = rows
             .last()
             .map(|r| r.spacing_bottom)
@@ -939,10 +873,6 @@ impl<'a> MarkDownImpl<'a> {
     }
 
     fn push_table(&self, node: &Node, pghviews: &mut Vec<PghView>) {
-        //TODO: 删除Table模式下的table_to_pghview，只使用table_to_table_row_pghviews
-        //let pghview = self.table_to_pghview(node);
-        //pghviews.push(pghview);
-
         for row in self.table_to_table_row_pghviews(node) {
             pghviews.push(row);
         }
@@ -992,7 +922,7 @@ impl<'a> MarkDownImpl<'a> {
                 let pghview = self.paragraph_to_pghview(node, self.format_default());
                 pghviews.push(pghview);
             }
-            Node::List(list) => {
+            Node::List(_list) => {
                 self.list_to_pgh_text_recursive(node, pghviews, 0);
             }
             Node::Blockquote(block) => {
@@ -1076,7 +1006,7 @@ impl<'a> MarkDownImpl<'a> {
                 .collect();
 
         } else {
-            for (no, line) in self.text.split('\n').enumerate() {
+            for (_no, line) in self.text.split('\n').enumerate() {
                 let sline = line.to_string();
                 let mut pgh_view = PghView::new_text();
                 pgh_view.push_text(sline, None);
@@ -1104,7 +1034,7 @@ impl<'a> MarkDownImpl<'a> {
                     links.insert(text_value[start + 2..end - 2].to_string(), ());
                 }
             }
-            Node::Link(link) => {
+            Node::Link(_link) => {
                 //todo, only support double links
                 //links.push(link.url.clone());
             }
@@ -1152,6 +1082,7 @@ impl<'a> MarkDownImpl<'a> {
 
     /// 根级相邻 AST 节点之间、仅含空白/换行的源码子串 → 应插入的空行数（与 `get_all_text` 按行用 `\n` 拼接一致）。
     /// `N` 个换行符对应 `N - 1` 条视觉空行。
+    #[allow(dead_code)]
     pub fn root_gap_empty_line_count(gap: &str) -> usize {
         if !Self::root_gap_is_whitespace_only(gap) {
             return 0;
@@ -1168,6 +1099,7 @@ impl<'a> MarkDownImpl<'a> {
         Self::root_gap_newline_count(gap)
     }
 
+    #[allow(dead_code)]
     pub fn root_gap_empty_line_count_before_node(gap: &str, next: &Node) -> usize {
         let blank_lines = Self::root_gap_empty_line_count(gap);
         Self::adjust_root_gap_for_next_node(blank_lines, next)

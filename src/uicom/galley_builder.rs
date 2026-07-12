@@ -9,6 +9,7 @@ pub struct GalleyBuilder<'a> {
     text: Option<String>,
     icon: Option<IconName>,
     fg: Option<Color32>,
+    icon_fg: Option<Color32>,
     bg: Option<Color32>,
     wrap_width: Option<f32>,
     font_size: Option<f32>,
@@ -23,6 +24,7 @@ impl<'a> GalleyBuilder<'a> {
             text: None,
             icon: None,
             fg: None,
+            icon_fg: None,
             bg: None,
             wrap_width: None,
             font_size: None,
@@ -45,6 +47,12 @@ impl<'a> GalleyBuilder<'a> {
     /// Set foreground color
     pub fn fg(mut self, color: Color32) -> Self {
         self.fg = Some(color);
+        self
+    }
+
+    /// 仅设置图标颜色（正文仍用 [`Self::fg`] 或默认文字色）
+    pub fn icon_fg(mut self, color: Color32) -> Self {
+        self.icon_fg = Some(color);
         self
     }
 
@@ -77,27 +85,34 @@ impl<'a> GalleyBuilder<'a> {
         let mut layout_job = LayoutJob::default();
         let default_font_id = FontSelection::Default.resolve(self.ui.style());
         let default_fg = self.fg.unwrap_or_else(|| self.ui.style().visuals.text_color());
+        let icon_color = self.icon_fg.unwrap_or(default_fg);
         let default_bg = self.bg.unwrap_or(Color32::TRANSPARENT);
         let default_font_size = self.font_size.unwrap_or(default_font_id.size);
         let default_icon_size = self.icon_size.unwrap_or(default_font_size);
+        let has_icon = self.icon.is_some();
 
         // If there's an icon, add it first
         if let Some(icon) = self.icon {
             let mut icon_format = TextFormat::default();
             icon_format.font_id.size = default_icon_size;
             icon_format.font_id.family = FontFamily::Name("icon".into());
-            icon_format.color = default_fg;
+            icon_format.color = icon_color;
             icon_format.background = default_bg;
             layout_job.append(&icon.to_char().to_string(), 0.0, icon_format);
         }
 
-        // If there's text, add text
+        // If there's text, add text（紧跟 icon 时用 leading_space 留出间隙）
         if let Some(text) = self.text {
             let mut text_format = TextFormat::default();
             text_format.font_id = default_font_id;
             text_format.font_id.size = default_font_size;
             text_format.color = default_fg;
-            layout_job.append(&text, 0.0, text_format);
+            let text_leading_space = if has_icon {
+                (default_font_size * 0.3125).max(3.0)
+            } else {
+                0.0
+            };
+            layout_job.append(&text, text_leading_space, text_format);
         }
 
         // Set wrap width

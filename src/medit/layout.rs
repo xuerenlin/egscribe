@@ -3,15 +3,17 @@ use std::usize;
 
 use eframe::egui::{
     Align, Event, EventFilter, FontId, ImeEvent, Key, Layout, CursorIcon,
-    Order, PointerButton, Rect, Response, ScrollArea, Ui, Vec2, ViewportCommand, Widget,
+    PointerButton, Rect, Response, ScrollArea, Sense, Ui, Vec2, ViewportCommand, Widget,
 };
 
 use crate::medit::{
-    ctx::HighlightRect, Action, Ctx, PghText, PghView, TextSpacing,
-    TEXT_BOTTOM_SPACE, TEXT_TOP_SPACE, ctxmenu::ContextMenu, cfg::HeightMode,
-    outline::TOC_SCAN_INTERVAL_SECS,
+    ctx::{HighlightRect, ScrollToLineMode},
+    Action, Ctx, PghText, PghView, TextSpacing,
+    TEXT_BOTTOM_SPACE, TEXT_TOP_SPACE, ctxmenu::{ContextMenu, EditorPluginMenuEntry},
+    cfg::HeightMode,
 };
 use crate::medit::pgh::LayoutResponse;
+use crate::uicom::CONTROL_HIGHLIGHT;
 
 pub struct Edit<'a> {
     ctx: &'a mut Ctx,
@@ -20,9 +22,18 @@ pub struct Edit<'a> {
 
 impl<'a> Edit<'a> {
     pub fn new(ctx: &'a mut Ctx) -> Self {
+        Self::new_with_plugin_command_items(ctx, Vec::new())
+    }
+
+    pub fn new_with_plugin_command_items(
+        ctx: &'a mut Ctx,
+        plugin_menu_items: Vec<EditorPluginMenuEntry>,
+    ) -> Self {
+        let mut context_menu = ContextMenu::new();
+        context_menu.add_plugin_command_items(plugin_menu_items);
         Self { 
             ctx,
-            context_menu: ContextMenu::new(),
+            context_menu,
         }
     }
 }
@@ -88,7 +99,31 @@ impl Edit<'_> {
         rect
     }
 
-    fn draw_line_no_text(ui: &mut Ui, ctx: &Ctx, pgh_rect: &Rect, line_no: &str, active: bool, sub_line: bool) {
+    fn draw_line_no_text(
+        ui: &mut Ui,
+        ctx: &Ctx,
+        pgh_rect: &Rect,
+        line_no: &str,
+        active: bool,
+        sub_line: bool,
+    ) -> Response {
+        let mut line_no_rect = ctx.line_no_rect();
+        line_no_rect.set_top(pgh_rect.top());
+        line_no_rect.set_bottom(pgh_rect.bottom());
+
+        let sense = if ctx.cfg().show_line_no && !sub_line {
+            Sense::click()
+        } else {
+            Sense::hover()
+        };
+        let response = ui
+            .allocate_rect(line_no_rect, sense)
+            .on_hover_cursor(CursorIcon::Default);
+
+        if !ctx.cfg().show_line_no {
+            return response;
+        }
+
         //line_no text
         let max_no_str = format!(" {}  ", ctx.line_num());
         let mut line_no_str = format!(" {}  ", line_no);
@@ -96,17 +131,8 @@ impl Edit<'_> {
             line_no_str.insert(0, ' ');
         }
 
-        //line_no rect
-        let mut line_no_rect = ctx.line_no_rect();
-        line_no_rect.set_top(pgh_rect.top());
-        line_no_rect.set_bottom(pgh_rect.bottom());
-
         //color
-        let color = if sub_line {
-            ui.style().visuals.weak_text_color()
-        } else {
-            ui.style().visuals.weak_text_color()
-        };
+        let color = ui.style().visuals.weak_text_color();
 
         let spacing = TextSpacing::text_spacing_in_rect(ctx.line_no_rect(), core::f32::INFINITY);
         PghText::layout_text(
@@ -126,28 +152,36 @@ impl Edit<'_> {
             line_no_rect.set_width(2.0);
             painter.rect_filled(line_no_rect, 0.0, ui.style().visuals.selection.bg_fill);
         }
+
+        response
     }
 
-    fn draw_divider_line(ui: &mut Ui, ctx: &Ctx) {
-        let divider_rect = ctx.divider_rect();
-        let painter = ui.painter_at(divider_rect);
-        painter.rect_filled(divider_rect, 0.0, ui.style().visuals.faint_bg_color);
-    }
-
-    fn draw_divider_line_for_rect(ui: &mut Ui, ctx: &Ctx, pgh_rect: &Rect) {
+    fn draw_divider_line_for_rect(ui: &mut Ui, ctx: &Ctx, pgh_rect: &Rect) -> Response {
         let mut divider_rect = ctx.divider_rect();
         divider_rect.set_top(pgh_rect.top());
         divider_rect.set_bottom(pgh_rect.bottom());
+        let response = ui.allocate_rect(divider_rect, Sense::hover());
         let painter = ui.painter_at(divider_rect);
         painter.rect_filled(divider_rect, 0.0, ui.style().visuals.faint_bg_color);
+        response
     }
 
-    fn draw_line_no_for_pgh(ui: &mut Ui, ctx: &mut Ctx, line_no: usize, pgh_view: &PghView, pgh_rect: &Rect) {
+    fn draw_line_no_for_pgh(
+        ui: &mut Ui,
+        ctx: &mut Ctx,
+        line_no: usize,
+        pgh_view: &PghView,
+        pgh_rect: &Rect,
+    ) -> Response {
+        let mut response = ui.allocate_rect(
+            Rect::from_min_max(pgh_rect.left_top(), pgh_rect.left_top()),
+            Sense::hover(),
+        );
         if pgh_view.is_code_row() {
             for segment in 0..=pgh_view.max_segment() {
                 let active = ctx.cursor2().line_no() == line_no && ctx.cursor2().segment == segment;
                 if let Some(seg_rect) = pgh_view.get_segment_rect(segment) {
-                    Self::draw_line_no_text(ui, ctx, &seg_rect, "", active, true);
+                    response |= Self::draw_line_no_text(ui, ctx, &seg_rect, "", active, true);
                 }
             }
         } else if pgh_view.is_table_row() {
@@ -155,29 +189,39 @@ impl Edit<'_> {
                 let row_end = pgh_view.max_segment() + 1;
                 let active = ctx.cursor2().line_no() == line_no
                     && (0..row_end).contains(&ctx.cursor2().segment);
-                Self::draw_line_no_text(ui, ctx, seg_rect, "", active, true);
+                response |= Self::draw_line_no_text(ui, ctx, seg_rect, "", active, true);
             }
-        } else if let Some(table_info) = &pgh_view.table_info {
-            for row in 0..table_info.row_count {
+        } else if let Some(table_info) = ctx.table_info_of_line(line_no) {
+            let row_count = if pgh_view.is_table_row() {
+                1
+            } else {
+                pgh_view.pgh.len() / table_info.col_count.max(1)
+            };
+            for row in 0..row_count {
                 let row_min = row * table_info.col_count;
                 let row_end = (row+1) * table_info.col_count;
                 if let Some(ref seg_rect) = pgh_view.get_segment_rect(row_min) {
                     let active = ctx.cursor2().line_no() == line_no && (row_min..row_end).contains(&ctx.cursor2().segment);
-                    Self::draw_line_no_text(ui, ctx, seg_rect, "", active, true);
+                    response |= Self::draw_line_no_text(ui, ctx, seg_rect, "", active, true);
                 }
             }
         }
         {
             let active = ctx.cursor2().line_no() == line_no;
             let line_no_str = format!("{}", line_no+1);
-            Self::draw_line_no_text(ui, ctx, pgh_rect, &line_no_str, active, false);
+            response |= Self::draw_line_no_text(ui, ctx, pgh_rect, &line_no_str, active, false);
         }
+        response
     }
 
     fn draw_all_pgh(ui: &mut Ui, ctx: &mut Ctx, response: &mut LayoutResponse) {
+        ctx.begin_layout_height_pass();
         let mut bottom_line = 0;
         ui.vertical(|ui| {
             for line_no in ctx.current_range() {
+                if ctx.prepare_render_hidden_line_for_draw(line_no) {
+                    continue;
+                }
                 ui.horizontal(|ui| {
                     ui.add_space(ctx.line_no_width());
                     ui.add_space(ctx.divider_rect().width());
@@ -191,6 +235,7 @@ impl Edit<'_> {
                                 }
                             }
                             response.response |= layout_response.response;
+                            response.focus_response |= layout_response.focus_response;
                             if layout_response.handled {
                                 response.handled = true;
                             }
@@ -206,8 +251,17 @@ impl Edit<'_> {
                         }
                     };
                     if let (Some(pgh_view), Some(rect)) = (pgh_view_opt, rect_opt) {
-                        Self::draw_line_no_for_pgh(ui, ctx, line_no, &pgh_view, &rect);
-                        Self::draw_divider_line_for_rect(ui, ctx, &rect);
+                        let line_no_response =
+                            Self::draw_line_no_for_pgh(ui, ctx, line_no, &pgh_view, &rect);
+                        let divider_response = Self::draw_divider_line_for_rect(ui, ctx, &rect);
+                        let line_no_clicked = line_no_response.clicked();
+                        response.response |= line_no_response;
+                        response.response |= divider_response;
+                        if line_no_clicked {
+                            ctx.select_line_to_next(line_no);
+                            ctx.flash_same_cache_with_seleted();
+                            response.handled = true;
+                        }
                     }
                 });
             }
@@ -222,9 +276,27 @@ impl Edit<'_> {
             //scroll to the cursor pos
             Self::scroll_check(ui, ctx);
         });
+        ctx.rebuild_index_if_layout_heights_changed();
+    }
+
+    fn draw_searching_highlight(ui: &mut Ui, ctx: &Ctx) {
+        if !ctx.is_find_filter_searching() {
+            return;
+        }
+        let base = ctx.line_no_rect();
+        let progress = ctx.find_filter_search_progress().clamp(0.0, 1.0);
+        let bar_h = base.height() * progress;
+        if bar_h <= 0.0 {
+            return;
+        }
+        let mut bar_rect = base;
+        bar_rect.set_width(2.0);
+        bar_rect.set_height(bar_h);
+        ui.painter_at(bar_rect).rect_filled(bar_rect, 0.0, CONTROL_HIGHLIGHT);
     }
 
     fn draw_edit_area(ui: &mut Ui, ctx: &mut Ctx, response: &mut LayoutResponse) {
+        Self::draw_searching_highlight(ui, ctx);
         ctx.highlight_refresh(ui);
         Self::draw_all_pgh(ui, ctx, response);
         Self::draw_select_rect(ui, ctx);
@@ -244,13 +316,16 @@ impl Edit<'_> {
 
     fn draw_edit_erea_in_scroll_viewport(ui: &mut Ui, ctx: &mut Ctx, response: &mut LayoutResponse) {
         ui.with_layout(Layout::top_down(Align::TOP), |ui| {
-            ctx.ensure_scroll_cumulative_offsets();
             let n = ctx.line_num();
             let total_lines_h = if n > 0 { ctx.scroll_cum_at(n) } else { 0.0 };
             let total_target = total_lines_h + ctx.scroll_bottom_padding();
 
-            let scroll_area = if let Some(scroll_to_line) = ctx.clean_scroll_to_line() {
-                let offset_y = ctx.scroll_offset_y_for_line(scroll_to_line);
+            let scroll_area = if let Some(mode) = ctx.clean_scroll_to_line() {
+                let offset_y = match mode {
+                    ScrollToLineMode::Top(line) => ctx.scroll_offset_y_for_line(line),
+                    ScrollToLineMode::Bottom(line) => ctx.scroll_offset_y_align_line_bottom(line),
+                    ScrollToLineMode::Center(line) => ctx.scroll_offset_y_center_line(line),
+                };
                 ScrollArea::both()
                     .id_salt(("medit_edit_scroll", ctx.scroll_area_id()))
                     .vertical_scroll_offset(offset_y)
@@ -270,13 +345,18 @@ impl Edit<'_> {
                     }
 
                     let margin = ctx.edit_rect().height().max(ctx.font_heigh() * 4.0);
-                    let (start, mut end) = ctx.scroll_lines_visible_for_viewport(&viewport, margin);
-                    end = end.min(start + ctx.patch_num()).min(n);
-                    end = end.max(start.saturating_add(1));
+                    //let (start_pre, end_pre) = ctx.scroll_lines_visible_for_viewport(&viewport, margin);
+                    //ctx.rebuild_index_tick(start_pre, end_pre);
+                    let (start, end_viewport) = ctx.scroll_lines_visible_for_viewport(&viewport, margin);
+                    let min_visible_height = viewport.height() + 2.0 * margin;
+                    let mut end = ctx.extend_layout_patch_end(start, end_viewport, min_visible_height);
+                    end = end.max(start.saturating_add(1)).min(n);
                     ctx.set_top_line(start);
                     ctx.set_layout_patch_end(end);
+                    ctx.request_rebuild_index_on_first_layout(start, end);
+                    ctx.rebuild_index_tick(start, end);
 
-                    let full_w = ui.available_width();
+                    let full_w = ctx.line_no_width() + ctx.edit_width(); //ui.available_width();
                     ui.vertical(|ui| {
                         ui.set_width(full_w);
                         let top_before = ui.cursor().top();
@@ -352,9 +432,59 @@ impl Edit<'_> {
         //cusror changed, ensure the corsor visible 
         if ctx.cursor2_cmp_and_bakup() {
             let c = ctx.cursor2();
-            if c.line_no < ctx.top_line() || c.line_no > ctx.bottom_line() {
-                let line_no = c.line_no.saturating_sub((ctx.edit_rect().height()/2.0/ctx.font_heigh()) as usize);
-                ctx.set_scroll_to_line(line_no);
+            let edit_rect = ctx.edit_rect();
+            // `top_line`/`bottom_line` 与用于推算可视行的 margin 组合后，行号上仍可能落在
+            // 「名义可视」区间内，但插入符像素已经超出编辑区（常见：上移时光标贴在可视区上沿外）。
+            let outside_line_window =
+                c.line_no < ctx.top_line() || c.line_no > ctx.bottom_line();
+            let caret = ctx.get_pos_from_cursor(&c);
+            let caret_outside_v = caret.is_some_and(|r| {
+                r.top() < edit_rect.top() || r.bottom() > edit_rect.bottom()
+            });
+            let caret_outside_h = caret.is_some_and(|r| {
+                r.left() < edit_rect.left() || r.right() > edit_rect.right()
+            });
+
+            let need_v = outside_line_window || caret_outside_v;
+            let need_h = caret_outside_h;
+
+            if need_v || need_h {
+                // 水平超出（以及同时垂直超出）：用 egui 在 ScrollArea 内滚动，两轴一次到位。
+                // 若同时再 schedule `vertical_scroll_offset`，下一帧会覆盖纵向状态导致打架。
+                if need_h {
+                    if let Some(caret_rect) = caret {
+                        log::info!("caret_rect: {:?}", caret_rect);
+                        ui.scroll_to_rect(caret_rect, Some(Align::Center));
+                    }
+                }
+                // 仅垂直超出：沿用 Top/Bottom/Center，减少跳跃感。
+                if need_v && !need_h {
+                    let outside_top = c.line_no < ctx.top_line();
+                    let outside_bottom = c.line_no > ctx.bottom_line();
+                    let mut scroll_up = outside_top;
+                    let mut scroll_down = outside_bottom;
+                    if let Some(cr) = caret {
+                        if cr.top() < edit_rect.top() {
+                            scroll_up = true;
+                        }
+                        if cr.bottom() > edit_rect.bottom() {
+                            scroll_down = true;
+                        }
+                    }
+                    if scroll_up && scroll_down {
+                        ctx.set_scroll_to_line_mode(ScrollToLineMode::Center(c.line_no));
+                    } else if scroll_up {
+                        ctx.set_scroll_to_line_mode(ScrollToLineMode::Top(
+                            c.line_no.saturating_sub(2),
+                        ));
+                    } else if scroll_down {
+                        ctx.set_scroll_to_line_mode(ScrollToLineMode::Bottom(
+                            c.line_no.saturating_add(2),
+                        ));
+                    } else {
+                        ctx.set_scroll_to_line_mode(ScrollToLineMode::Center(c.line_no));
+                    }
+                }
             }
         }
     }
@@ -405,7 +535,15 @@ impl Edit<'_> {
         }
     }
 
+    fn execute_deferred_editor_actions(ui: &mut Ui, ctx: &mut Ctx) {
+        for action in ctx.take_deferred_editor_actions() {
+            action.execute(ctx, ui);
+        }
+    }
+
     fn ui_impl(&mut self, ui: &mut Ui) -> Response {
+        Self::execute_deferred_editor_actions(ui, self.ctx);
+
         //zero spacing between lines
         let spacing = ui.spacing_mut();
         spacing.item_spacing.x = 0.0;
@@ -429,27 +567,24 @@ impl Edit<'_> {
         self.ctx.set_rect(max_rect, line_no_rect.width(), scroll_bar_width);
         self.ctx.set_font_heigh(line_no_rect.height() + TEXT_TOP_SPACE + TEXT_BOTTOM_SPACE);
 
-        let now = ui.ctx().input(|i| i.time);
-        self.ctx
-            .toc_ensure_updated(now, TOC_SCAN_INTERVAL_SECS);
-
         //layout edit
         let top = ui.cursor().left_top();
         let initial_response = ui.allocate_rect(Rect::from_pos(top), self.ctx.sense());
         let mut layout_response = LayoutResponse::from_response(initial_response);
         Self::draw_edit_erea_in_scroll_viewport(ui, self.ctx, &mut layout_response);
 
-        let response = &mut layout_response.response;
         let event_handled = layout_response.handled;
+        let focus_target = layout_response.focus_target();
+        let response = &mut layout_response.response;
 
         //request focus
+        if self.ctx.take_request_focus()
+            || focus_target.clicked()
+            || (focus_target.hovered() && ui.input(|i| i.pointer.any_pressed())) {
+            ui.memory_mut(|mem| mem.request_focus(response.id));
+            ui.ctx().send_viewport_cmd(ViewportCommand::IMEAllowed(true));
+        }
         if let Some(pointer_pos) = ui.ctx().pointer_interact_pos() {
-            if response.clicked() || 
-               (response.hovered() && ui.input(|i| i.pointer.any_pressed())) {   
-                ui.memory_mut(|mem| mem.request_focus(response.id));
-
-                ui.ctx().send_viewport_cmd(ViewportCommand::IMEAllowed(true));
-            }
             if response.double_clicked() {
                 self.ctx.set_cursor2_from_pos(&pointer_pos);
                 self.ctx.select_word_at_cursor();
@@ -513,7 +648,7 @@ impl Edit<'_> {
 
     fn on_mouse_event(ui: &mut Ui, ctx: &mut Ctx, event: &Event) -> bool {
         match event {
-            Event::MouseMoved(v) => true,
+            Event::MouseMoved(_v) => true,
             Event::PointerMoved(pos) => {
                 if ctx.is_selecting() {
                     //selecting
@@ -544,8 +679,8 @@ impl Edit<'_> {
                     ctx.flash_same_cache_with_seleted();
                     Self::set_ime_cursor_area(ui, ctx);
 
-                    //line click command
-                    if ctx.cfg().need_line_click_cmd {
+                    //line click command（仅在正文区内松开，避免水平滚动条等区域误触）
+                    if ctx.cfg().need_line_click_cmd && ctx.is_pos_in_edit_area(pos) && !ctx.is_selected() {
                         let line_txt = ctx.get_line_text(ctx.cursor2().line_no);
                         ctx.insert_cmd(Action::click_edit_line(line_txt));
                     }
@@ -553,7 +688,7 @@ impl Edit<'_> {
                 true
             }
             Event::MouseWheel {
-                unit,
+                unit: _,
                 delta,
                 modifiers,
             } => {
@@ -626,7 +761,7 @@ impl Edit<'_> {
     }
 
     //window.set_ime_cursor_area(LogicalPosition::new(cursor_pos[0], cursor_pos[1]), LogicalSize::new(100, 100));
-    fn on_ime_event(ui: &mut Ui, ctx: &mut Ctx, event: &Event) -> bool {
+    fn on_ime_event(_ui: &mut Ui, ctx: &mut Ctx, event: &Event) -> bool {
         match event {
             Event::Ime(ImeEvent::Commit(s)) => {
                 log::debug!("{:?}", event);
@@ -707,14 +842,6 @@ impl Edit<'_> {
             _ => {}
         }
         false
-    }
-
-    fn is_on_top(ui: &mut Ui) -> bool {
-        //todo, don't know how to contrl edit focus
-        let top_layer_id = ui.ctx().memory(|mem|mem.areas().top_layer_id(Order::Middle));
-        let self_layer_id = ui.layer_id();
-        //println!("top_layer_id:{:?} self_layer_id:{:?}", top_layer_id, self_layer_id);
-        return top_layer_id == Some(self_layer_id);
     }
 
     fn on_shortcut_event(ui: &mut Ui, ctx: &mut Ctx, event: &Event) -> bool {

@@ -1,7 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")] // hide console window on Windows in release
 #![allow(rustdoc::missing_crate_level_docs)] // it's an example
 
-mod sitter;
 mod ime_win_bridge;
 mod util;
 mod uicom;
@@ -16,11 +15,15 @@ mod plugin;
 mod sidepanel;
 
 use std::vec;
-use toolbar::{ToolBar, PathBar, WinBar, FileStatusBar, TabButtonBar};
+use toolbar::{
+    FileStatusBar, PathBar, TabButtonBar, WinBar, paint_window_border, show_about_dialog,
+    show_main_title_bar, title_bar_fill,
+};
 use store::Store;
-use eframe::egui::{self, Color32, Stroke, Vec2};
+use eframe::egui::{self, Color32, Stroke, Vec2, widgets::ProgressBar};
 use eframe::egui::{Order, Rect, EventFilter, Ui, Event, Key};
 use std::sync::mpsc;
+use std::time::Duration;
 use util::start_process;
 use sidepanel::SidePanel;
 
@@ -40,6 +43,7 @@ fn main() -> Result<(), eframe::Error> {
     let icon = eframe::icon_data::from_png_bytes(&include_bytes!("../desktop/egscribe.png")[..]).unwrap();
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
+            .with_decorations(false)
             .with_icon(icon)
             .with_inner_size([1240.0, 720.0]),
         ..Default::default()
@@ -174,14 +178,27 @@ impl MyApp {
             .frame(win_frame)
             .show(ctx, |ui| {
                 TabButtonBar::from_note_and_file_tabs(ui, &mut self.store);
+
+                //大文件打开进度条
+                if let Some(progress) = self.store.async_open_progress() {
+                    let width = ui.available_width();
+                    ui.add(
+                        ProgressBar::new(progress)
+                            .desired_width(width)
+                            .desired_height(2.0),
+                    );
+                    ctx.request_repaint_after(Duration::from_millis(16));
+                }
+
                 if let Some(cur_path) = self.store.note_space.get_current_path() {
                     ui.horizontal(|ui|{
                         ui.add(PathBar::new(&mut self.store, cur_path));
                     });
                 }
 
+                let plugin_menu_items = self.store.editor_plugin_context_menu_actions();
                 if let Some((_uni_file,edit_ctx)) = self.store.cur_edit_ctx_mut() {
-                    ui.add(medit::Edit::new(edit_ctx));
+                    ui.add(medit::Edit::new_with_plugin_command_items(edit_ctx, plugin_menu_items));
                 }
             });
     }
@@ -242,16 +259,19 @@ impl eframe::App for MyApp {
 
         self.update_title(ctx);
         self.open_file_command_from_ipc_rx(ctx);
+        self.store.tick_async_open();
 
-        
-        egui::TopBottomPanel::top("top")
+        egui::TopBottomPanel::top("main_window_title")
+            .frame(
+                egui::Frame::new()
+                    .fill(title_bar_fill(&ctx.style().visuals))
+                    .inner_margin(0.0),
+            )
             .show_separator_line(true)
             .show(ctx, |ui| {
-                ui.horizontal(|ui|{
-                    ui.add(ToolBar::new(&mut self.store));
-                    //TabButtonBar::from_note_and_file_tabs(ui, &mut self.store);
-                });
-        });
+                show_main_title_bar(ui, &self.title, &mut self.store);
+            });
+
         
         egui::TopBottomPanel::bottom("bottom").show(ctx, |ui|{
             if let Some(_) = self.store.note_space.get_current_path() {
@@ -306,9 +326,7 @@ impl eframe::App for MyApp {
             }
 
             //find window 
-            if let Some(find) = self.store.find_window.show(ui) {
-                self.store.execute_find(find);
-            }
+            self.store.handle_find_window(ui);
 
             //hot keys
             self.hot_keys(ui);
@@ -326,6 +344,7 @@ impl eframe::App for MyApp {
         
         // preview files dropped
         preview_files_being_dropped(ctx);
+        show_about_dialog(ctx);
         show_non_text_file_prompt(ctx, &mut self.store);
 
         // Collect dropped files:
@@ -344,6 +363,7 @@ impl eframe::App for MyApp {
         // Check and perform auto-save for notes
         self.store.check_auto_save();
 
+        paint_window_border(ctx);
     }
 
 }
@@ -389,7 +409,7 @@ fn show_non_text_file_prompt(ctx: &egui::Context, store: &mut Store) {
     let Some(prompt) = store.pending_non_text_file_prompt().cloned() else {
         return;
     };
-    Window::new("无法直接打开文件")
+    Window::new(i18n::tr("non_text_prompt.title"))
         .anchor(Align2::CENTER_CENTER, [0.0, 0.0])
         .collapsible(false)
         .resizable(true)
@@ -397,21 +417,24 @@ fn show_non_text_file_prompt(ctx: &egui::Context, store: &mut Store) {
         .min_size([400.0, 100.0])
         .order(Order::Foreground)
         .show(ctx, |ui| {
-            ui.label(format!("文件：{}", prompt.file_path));
+            ui.label(format!(
+                "{} {}",
+                i18n::tr("non_text_prompt.file_label"),
+                prompt.file_path
+            ));
             ui.add_space(8.0);
             ui.colored_label(Color32::from_rgb(255, 120, 120), &prompt.reason);
             ui.add_space(12.0);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
-                if ui.button("关闭").clicked() {
+                if ui.button(i18n::tr("non_text_prompt.close")).clicked() {
                     store.dismiss_non_text_file_prompt();
                 }
-                if ui.button("调用插件读取文件").clicked() {
+                if ui.button(i18n::tr("non_text_prompt.read_with_plugin")).clicked() {
                     store.request_read_non_text_with_plugin();
                 }
             });
         });
 }
-
 
 fn load_fonts(ctx: &egui::Context) {
     let mut fonts = egui::FontDefinitions::default();

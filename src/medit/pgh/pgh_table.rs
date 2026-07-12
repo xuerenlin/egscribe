@@ -2,12 +2,12 @@ use core::f32;
 use serde::{Serialize, Deserialize};
 use eframe::egui::epaint::text::{LayoutJob, TextFormat};
 use eframe::egui::{
-    FontFamily, Grid, NumExt, Pos2, Rect, Response, Stroke, Ui, Vec2,
+    Align, FontFamily, Grid, Layout, NumExt, Pos2, Rect, Response, Stroke, StrokeKind, Ui, Vec2,
     vec2, CursorIcon, Sense,
 };
 use super::pgh_items::PghIndent;
 use crate::medit::{Cursor, Ctx, DoCmd, PghText, TextSpacing};
-use crate::uicom::{IconName, icon_button_builder};
+use crate::uicom::{CONTROL_HIGHLIGHT, IconName, icon_button_builder};
 use super::{LayoutResponse, PghType, PghView};
 
 #[derive(Clone, Debug)]
@@ -27,31 +27,35 @@ pub enum TableFrameStyle {
 
 #[derive(Clone, Debug)]
 pub struct TableInfo {
-    pub row_count: usize,
     pub col_count: usize,
-    /// 在整张逻辑表中的行下标（`PghType::TableRow` 每行一个 `PghView` 时使用；`Table` 可为 0）
-    pub table_row_index: usize,
-    /// 逻辑表总行数（`TableRow` 使用；`Table` 可与 `row_count` 一致）
-    pub table_total_rows: usize,
+    pub row_count: usize,
+    pub row_index: usize,
+    pub head_line_no: usize,
     pub spacing_x: f32,
     pub spacing_y: f32,
     pub spacing_indent: f32,
     pub col_min_width: f32,
     pub frame_style: TableFrameStyle,
+    /// 表头（逻辑第 0 行）各数据列 checkbox 勾选状态
+    pub head_col_checked: Vec<bool>,
+    /// 表头行号列 checkbox 勾选状态（仅在显示行号列时可见）
+    pub head_index_checked: bool,
 }
 
 impl Default for TableInfo {
     fn default() -> Self {
         TableInfo {
-            row_count: 0,
             col_count: 0,
-            table_row_index: 0,
-            table_total_rows: 0,
+            row_index: 0,
+            row_count: 0,
+            head_line_no: 0,
             spacing_x: 12.0,
             spacing_y: 12.0,
             spacing_indent: 16.0,
             col_min_width: 64.0,
             frame_style: TableFrameStyle::Full,
+            head_col_checked: vec![],
+            head_index_checked: false,
         }
     }
 }
@@ -59,25 +63,28 @@ impl Default for TableInfo {
 impl TableInfo {
     /// 行号列宽度等 UI 用的逻辑行数（整块表）
     pub fn logical_row_count_for_ui(&self) -> usize {
-        if self.table_total_rows > 0 {
-            self.table_total_rows
+        if self.row_count > 0 {
+            self.row_count
         } else {
-            self.row_count.max(1)
+            1
         }
     }
+
+    pub fn ensure_head_col_checked_len(&mut self) {
+        if self.head_col_checked.len() < self.col_count {
+            self.head_col_checked.resize(self.col_count, false);
+        } else if self.head_col_checked.len() > self.col_count {
+            self.head_col_checked.truncate(self.col_count);
+        }
+    }
+
 }
 
 impl PghView {
-    pub fn new_table() -> Self {
-        PghView::new(PghType::Table)
-    }
+    const TABLE_HEAD_CHECKBOX_GAP_X: f32 = 8.0;
 
     pub fn new_table_row() -> Self {
         PghView::new(PghType::TableRow)
-    }
-
-    pub fn is_table(&self) -> bool {
-        self.pgh_type == PghType::Table
     }
 
     pub fn is_table_row(&self) -> bool {
@@ -85,40 +92,33 @@ impl PghView {
     }
 
     pub fn is_table_like(&self) -> bool {
-        self.is_table() || self.is_table_row()
+        self.is_table_row()
+    }
+
+    fn table_col_count_local(&self) -> usize {
+        self.pgh.len().max(1)
     }
 }
 
 /// impl tables
 impl PghView {
     pub fn table_segment_to_cell(&self, segment: usize) -> Option<TableCell> {
-        if let Some(table_info) = &self.table_info {
-            if self.is_table_row() {
-                let col = segment.min(table_info.col_count.saturating_sub(1));
-                Some(TableCell {
-                    row: table_info.table_row_index,
-                    col,
-                    segment: col,
-                })
-            } else {
-                Some(TableCell {
-                    row: segment / table_info.col_count,
-                    col: segment % table_info.col_count,
-                    segment,
-                })
-            }
+        if self.is_table_row() {
+            let col_count = self.table_col_count_local();
+            let col = segment.min(col_count.saturating_sub(1));
+            Some(TableCell {
+                row: 0,
+                col,
+                segment: col,
+            })
         } else {
             None
         }
     }
 
     pub fn table_cell_to_segment(&self, cell: &TableCell) -> usize {
-        if let Some(table_info) = &self.table_info {
-            if self.is_table_row() {
-                cell.col
-            } else {
-                cell.row * table_info.col_count + cell.col
-            }
+        if self.is_table_row() {
+            cell.col
         } else {
             0
         }
@@ -126,45 +126,24 @@ impl PghView {
 
     //return left-top,right-bottom
     pub fn table_range_to_cells(&self, s1: usize, s2: usize) -> Option<(TableCell, TableCell)> {
-        if let Some(table_info) = &self.table_info {
-            if self.is_table_row() {
-                let col_a = s1.min(table_info.col_count.saturating_sub(1));
-                let col_b = s2.min(table_info.col_count.saturating_sub(1));
-                let col_min = col_a.min(col_b);
-                let col_max = col_a.max(col_b);
-                let r = table_info.table_row_index;
-                Some((
-                    TableCell {
-                        row: r,
-                        col: col_min,
-                        segment: col_min,
-                    },
-                    TableCell {
-                        row: r,
-                        col: col_max,
-                        segment: col_max,
-                    },
-                ))
-            } else {
-                let c1 = self.table_segment_to_cell(s1).unwrap();
-                let c2 = self.table_segment_to_cell(s2).unwrap();
-                let row_min = std::cmp::min(c1.row, c2.row);
-                let row_max = std::cmp::max(c1.row, c2.row);
-                let col_min = std::cmp::min(c1.col, c2.col);
-                let col_max = std::cmp::max(c1.col, c2.col);
-                Some((
-                    TableCell {
-                        row: row_min,
-                        col: col_min,
-                        segment: row_min * table_info.col_count + col_min,
-                    },
-                    TableCell {
-                        row: row_max,
-                        col: col_max,
-                        segment: row_max * table_info.col_count + col_max,
-                    },
-                ))
-            }
+        if self.is_table_row() {
+            let col_count = self.table_col_count_local();
+            let col_a = s1.min(col_count.saturating_sub(1));
+            let col_b = s2.min(col_count.saturating_sub(1));
+            let col_min = col_a.min(col_b);
+            let col_max = col_a.max(col_b);
+            Some((
+                TableCell {
+                    row: 0,
+                    col: col_min,
+                    segment: col_min,
+                },
+                TableCell {
+                    row: 0,
+                    col: col_max,
+                    segment: col_max,
+                },
+            ))
         } else {
             None
         }
@@ -182,26 +161,16 @@ impl PghView {
     }
 
     pub fn table_is_empty_row(&self, row: usize) -> bool {
-        if let Some(table_info) = &self.table_info {
-            if self.is_table_row() {
-                if row != table_info.table_row_index {
+        if !self.is_table_row() {
+            return true;
+        }
+        if row != 0 {
+            return false;
+        }
+        for col in 0..self.table_col_count_local() {
+            if let Some(pgh_segment) = self.pgh.get(col) {
+                if pgh_segment.item.text().len() > 0 {
                     return false;
-                }
-                for col in 0..table_info.col_count {
-                    if let Some(pgh_segment) = self.pgh.get(col) {
-                        if pgh_segment.item.text().len() > 0 {
-                            return false;
-                        }
-                    }
-                }
-                return true;
-            }
-            for col in 0..table_info.col_count {
-                let segment = row * table_info.col_count + col;
-                if let Some(pgh_segment) = self.pgh.get(segment) {
-                    if pgh_segment.item.text().len() > 0 {
-                        return false;
-                    }
                 }
             }
         }
@@ -209,107 +178,50 @@ impl PghView {
     }
 
     pub fn table_is_empty_col(&self, col: usize) -> bool {
-        if let Some(table_info) = &self.table_info {
-            if self.is_table_row() {
-                if let Some(pgh_segment) = self.pgh.get(col) {
-                    return pgh_segment.item.text().is_empty();
-                }
-                return true;
+        if self.is_table_row() {
+            if let Some(pgh_segment) = self.pgh.get(col) {
+                return pgh_segment.item.text().is_empty();
             }
-            for row in 0..table_info.row_count {
-                let segment = row * table_info.col_count + col;
-                if let Some(pgh_segment) = self.pgh.get(segment) {
-                    if pgh_segment.item.text().len() > 0 {
-                        return false;
-                    }
-                }
-            }
+            return true;
         }
         true
     }
 
     pub fn table_delete_row(&mut self, row: usize) {
-        if let Some(table_info) = &mut self.table_info {
-            for col in 0..table_info.col_count {
-                let segment = row * table_info.col_count;
-                self.pgh.remove(segment);
-            }
-            table_info.row_count -= 1;
+        if !self.is_table_row() || row > 0 {
+            return;
         }
+        self.pgh.clear();
     }
 
     pub fn table_delete_col(&mut self, col: usize) {
-        if let Some(table_info) = &mut self.table_info {
-            for row in (0..table_info.row_count).rev() {
-                let segment = row * table_info.col_count + col;
-                self.pgh.remove(segment);
-            }
-            table_info.col_count -= 1;
+        if !self.is_table_row() {
+            return;
         }
-    }
-
-    pub fn table_delete_empty_in_range(&mut self, s1: usize, s2: usize) {
-        let mut empty_row = vec![];
-        let mut empty_col = vec![];
-        if let Some(table_info) = &self.table_info {
-            if self.is_table_row() {
-                // 整行/整列删除由 Ctx 在块上处理；此处不修改 segment 结构
-                let _ = (s1, s2, table_info);
-                return;
-            }
-            if let Some((min, max)) = self.table_range_to_cells(s1, s2) {
-                if min.col == 0 && max.col + 1 == table_info.col_count {
-                    for row in min.row..=max.row {
-                        if self.table_is_empty_row(row) {
-                            empty_row.push(row);
-                        }
-                    }
-                }
-                if min.row == 0 && max.row + 1 == table_info.row_count {
-                    for col in min.col..=max.col {
-                        if self.table_is_empty_col(col) {
-                            empty_col.push(col);
-                        }
-                    }
-                }
-            }
-            for row in empty_row.iter().rev() {
-                self.table_delete_row(*row);
-            }
-            for col in empty_col.iter().rev() {
-                self.table_delete_col(*col);
-            }
+        if col < self.pgh.len() {
+            self.pgh.remove(col);
         }
     }
 
     ///return: segments inserted
     pub fn table_insert_row(&mut self, row: usize) -> usize {
-        let mut segment = 0;
-        let mut col_count = 0;
-        if let Some(table_info) = &mut self.table_info {
-            segment = table_info.col_count * row;
-            col_count = table_info.col_count;
-            table_info.row_count += 1;
+        if !self.is_table_row() || row != 0 {
+            return 0;
         }
-        for i in 0..col_count {
-            self.insert_text(segment, "".to_string(), None);
+        let col_count = self.table_col_count_local();
+        for _ in 0..col_count {
+            self.push_text(String::new(), None);
         }
-        return col_count;
+        col_count
     }
 
     ///return: segments inserted
     pub fn table_insert_col(&mut self, col: usize) -> usize {
-        let mut segments = vec![];
-        if let Some(table_info) = &mut self.table_info {
-            for row in (0..table_info.row_count).rev() {
-                segments.push(table_info.col_count * row + col);
-            }
-            table_info.col_count += 1;
+        if !self.is_table_row() {
+            return 0;
         }
-        for i in &segments {
-            self.insert_text(*i, "".to_string(), None);
-        }
-        return segments.len();
+        self.insert_text(col.min(self.pgh.len()), "".to_string(), None);
+        1
     }
 
     /// 在 `PghType::TableRow` 的当前行于列 `col` 前插入一空列
@@ -318,9 +230,6 @@ impl PghView {
             return;
         }
         self.insert_text(col, "".to_string(), None);
-        if let Some(ti) = &mut self.table_info {
-            ti.col_count += 1;
-        }
     }
 
     /// 删除 `TableRow` 当前行的一列（`0..col_count`），至少保留一列。
@@ -328,60 +237,28 @@ impl PghView {
         if !self.is_table_row() {
             return;
         }
-        let Some(ti) = &mut self.table_info else {
-            return;
-        };
-        if ti.col_count <= 1 || col >= ti.col_count || col >= self.pgh.len() {
+        let col_count = self.table_col_count_local();
+        if col_count <= 1 || col >= col_count || col >= self.pgh.len() {
             return;
         }
         self.pgh.remove(col);
-        ti.col_count -= 1;
     }
 
     //return new segment after change
     pub fn table_merge(&mut self, segment: usize, change: &PghView) -> usize {
-        let mut min_cell = TableCell {
-            row: 0,
-            col: 0,
-            segment: 0,
-        };
-        let mut new_seg = segment;
-        if let Some(table_info) = self.table_info.clone() {
-            if let Some(change_info) = &change.table_info {
-                min_cell = self.table_segment_to_cell(segment).unwrap();
-                let max_cell = TableCell {
-                    row: min_cell.row + change_info.row_count,
-                    col: min_cell.col + change_info.col_count,
-                    segment: 0,
-                };
-                for r in table_info.row_count..max_cell.row {
-                    self.table_insert_row(table_info.row_count);
-                }
-                for c in table_info.col_count..max_cell.col {
-                    self.table_insert_col(table_info.col_count);
-                }
+        let new_seg = segment.min(self.pgh.len());
+        for i in 0..change.pgh.len() {
+            let txt = change.get_segment_text(i);
+            if new_seg + i < self.pgh.len() {
+                self.update_segment_text(new_seg + i, txt);
+            } else {
+                self.insert_text(new_seg + i, txt, None);
             }
         }
-
-        if let Some(table_info) = self.table_info.clone() {
-            new_seg = min_cell.row * table_info.col_count + min_cell.col;
-            if let Some(change_info) = &change.table_info {
-                for r in 0..change_info.row_count {
-                    for c in 0..change_info.col_count {
-                        let org_seg = r * change_info.col_count + c;
-                        let org_txt = change.get_segment_text(org_seg);
-                        let dst_seg =
-                            (min_cell.row + r) * table_info.col_count + (min_cell.col + c);
-                        self.update_segment_text(dst_seg, org_txt);
-                    }
-                }
-            }
-        }
-
         new_seg
     }
 
-    pub fn table_head_job(ui: &Ui, ctx: &Ctx, text: &str) -> LayoutJob {
+    pub fn table_head_job(_ui: &Ui, ctx: &Ctx, text: &str) -> LayoutJob {
         let mut job: LayoutJob = LayoutJob::default();
         let mut format = TextFormat::default();
         format.font_id.size = ctx.font_size();
@@ -391,7 +268,7 @@ impl PghView {
         job
     }
 
-    pub fn table_cell_job(ui: &Ui, ctx: &Ctx, text: &str) -> LayoutJob {
+    pub fn table_cell_job(_ui: &Ui, ctx: &Ctx, text: &str) -> LayoutJob {
         let mut job: LayoutJob = LayoutJob::default();
         let mut format = TextFormat::default();
         format.font_id.size = ctx.font_size();
@@ -401,6 +278,61 @@ impl PghView {
         job
     }
 
+    fn table_head_checkbox_size(ctx: &Ctx) -> Vec2 {
+        let row_height = ctx.font_heigh();
+        vec2(row_height * 0.7, row_height * 0.7)
+    }
+
+    pub(crate) fn table_head_checkbox_total_width(ctx: &Ctx) -> f32 {
+        Self::table_head_checkbox_size(ctx).x + Self::TABLE_HEAD_CHECKBOX_GAP_X
+    }
+
+    fn table_layout_head_checkbox(
+        ui: &mut Ui,
+        ctx: &Ctx,
+        checked: bool,
+        interactive: bool,
+    ) -> (bool, Response) {
+        let box_size = Self::table_head_checkbox_size(ctx);
+        let sense = if interactive { Sense::click() } else { Sense::hover() };
+        let (rect, mut response) = ui.allocate_exact_size(box_size, sense);
+        let mut new_checked = checked;
+        if interactive && response.clicked() {
+            new_checked = !new_checked;
+            response.mark_changed();
+        }
+
+        let stroke_color = CONTROL_HIGHLIGHT;
+        let rounding = 1.0;
+        let rect_inner = rect.shrink(1.0);
+        ui.painter().rect_stroke(
+            rect_inner,
+            rounding,
+            Stroke::new(1.0, stroke_color),
+            StrokeKind::Outside,
+        );
+
+        if new_checked {
+            let w = rect_inner.width();
+            let h = rect_inner.height();
+            let p1 = Pos2::new(rect_inner.left() + w * 0.2, rect_inner.center().y);
+            let p2 = Pos2::new(rect_inner.left() + w * 0.45, rect_inner.bottom() - h * 0.2);
+            let p3 = Pos2::new(rect_inner.right() - w * 0.2, rect_inner.top() + h * 0.2);
+            ui.painter()
+                .line_segment([p1, p2], Stroke::new(2.8, stroke_color));
+            ui.painter()
+                .line_segment([p2, p3], Stroke::new(2.8, stroke_color));
+        }
+
+        response |= ui
+            .allocate_exact_size(
+                vec2(Self::TABLE_HEAD_CHECKBOX_GAP_X, response.rect.height()),
+                Sense::hover(),
+            )
+            .1;
+        (new_checked, response)
+    }
+
     pub fn table_guess_text_width(ui: &Ui, ctx: &Ctx, row: usize, text: String) -> f32 {
         let min_width = 8.0;
         let job = if row == 0 {
@@ -408,69 +340,24 @@ impl PghView {
         } else {
             Self::table_cell_job(ui, ctx, &text)
         };
-        ui.fonts_mut(|f| f.layout_job(job)).rect.width().at_least(min_width)
+        let mut width = ui.fonts_mut(|f| f.layout_job(job)).rect.width().at_least(min_width);
+        if row == 0 && ctx.cfg().show_table_head_checkbox {
+            width += Self::table_head_checkbox_total_width(ctx);
+        }
+        width
     }
 
     pub fn table_guess_width(&self, ui: &Ui, ctx: &Ctx) -> Vec<f32> {
-        if let Some(table_info) = &self.table_info {
-            const TABLE_WIDTH_SAMPLE_ROWS: usize = 15;
-            let mut width_info = vec![];
-            let mut max_width = ctx.edit_width();
-            max_width -= table_info.spacing_indent;
-            max_width -= 64.0; //left right buttons space
-            if ctx.cfg().show_table_row_no {
-                max_width -= Self::table_index_col_width(
-                    table_info.logical_row_count_for_ui(),
-                    table_info.col_min_width,
-                );
-                max_width -= table_info.spacing_x;
-            }
-            let sample_rows = table_info.row_count.min(TABLE_WIDTH_SAMPLE_ROWS);
-
-            for c in 0..table_info.col_count {
-                let mut c_width = 0.0;
-                for r in 0..sample_rows {
-                    let cell_i = r * table_info.col_count + c;
-                    if let Some(pgh_segment) = self.pgh.get(cell_i) {
-                        let text = pgh_segment.item.text();
-                        let w = Self::table_guess_text_width(ui, ctx, r, text);
-                        c_width = w.at_least(c_width);
-                    }
-                }
-                if table_info.row_count > TABLE_WIDTH_SAMPLE_ROWS {
-                    c_width = c_width.at_least(table_info.col_min_width);
-                }
-                width_info.push(c_width);
-                if c != 0 {
-                    max_width -= table_info.spacing_x;
-                }
-            }
-
-            let total: f32 = width_info.iter().sum();
-            let warp_total: f32 = width_info
-                .iter()
-                .filter(|w| **w > table_info.col_min_width)
-                .sum();
-            let keep_total: f32 = total - warp_total;
-            let max_warp_width = max_width - keep_total;
-
-            if total > max_width && max_width > 0.0 && max_warp_width > 0.0 {
-                let new_info: Vec<f32> = width_info
-                    .iter()
-                    .map(|w| {
-                        if *w <= table_info.col_min_width {
-                            *w
-                        } else {
-                            (w / warp_total * max_warp_width).at_least(table_info.col_min_width)
-                        }
-                    })
-                    .collect();
-                width_info = new_info;
-            }
-            width_info
-        } else {
-            vec![]
+        if !self.is_table_row() {
+            return vec![];
         }
+        let table_info = TableInfo::default();
+        let mut width_info = vec![];
+        for c in 0..self.table_col_count_local() {
+            let text = self.get_segment_text(c);
+            width_info.push(Self::table_guess_text_width(ui, ctx, 0, text).at_least(table_info.col_min_width));
+        }
+        width_info
     }
 
     pub(crate) fn table_index_col_width(row_count: usize, col_min_width: f32) -> f32 {
@@ -519,7 +406,7 @@ impl PghView {
 
                             // 逻辑首行：与 Full 边框、`layout_table_row_line` 的 `is_first_row` 一致
                             let is_logical_first_row =
-                                table_info.table_row_index.saturating_add(r) == 0;
+                                table_info.row_index.saturating_add(r) == 0;
                             let stroke = if is_logical_first_row {
                                 text_stroke
                             } else {
@@ -532,15 +419,15 @@ impl PghView {
             }
             TableFrameStyle::Full => {
                 // 全边框：与 Horizontal 相同用 `line_segment`；每个单元格只在右侧画竖线、在底部画横线。
-                // 逻辑首行补顶边、首列补左边：`Table` 时 `table_row_index==0`，行下标即 `r`；
-                // `TableRow` 时每格 `Grid` 只有一行（`r==0`），须用 `table_row_index==0` 判断首行
+                // 逻辑首行补顶边、首列补左边：每格 `Grid` 只有一行（`r==0`），
+                // 须用 `table_row_index==0` 判断首行
                 //（与 `layout_table_row_line` 的 `is_first_row` 一致）。
                 let stroke = Stroke::new(0.5, ui.visuals().weak_text_color());
                 let painter = ui.painter();
 
                 for r in frame_start..=frame_end {
                     if let Some(row) = cell_rects.get(r) {
-                        let is_logical_first_row = table_info.table_row_index.saturating_add(r) == 0;
+                        let is_logical_first_row = table_info.row_index.saturating_add(r) == 0;
                         for (c, cell) in row.iter().enumerate() {
                             let rect = cell.expand2(Vec2 {
                                 x: table_info.spacing_x / 2.0,
@@ -585,16 +472,65 @@ impl PghView {
         }
     }
 
-    fn table_reset_cursor(pgh: &PghView, ctx: &mut Ctx, row: usize, col: usize, cursor: &Cursor) {
-        let mut new_cursor = *cursor;
-        if let Some(info) = &pgh.table_info {
-            new_cursor.segment = if pgh.is_table_row() {
-                col
-            } else {
-                row * info.col_count + col
-            };
-            ctx.set_cursor2(new_cursor);
-            ctx.set_cursor1_reset();
+    fn table_draw_checked_background(
+        ui: &mut Ui,
+        ctx: &Ctx,
+        table_info: &TableInfo,
+        current_row_checked: bool,
+        all_cell_rects: &[Vec<Rect>],
+        data_cell_rects: &[Vec<Rect>],
+        frame_start: usize,
+        frame_end: usize,
+    ) {
+        let row_count = all_cell_rects.len();
+        if row_count == 0 {
+            return;
+        }
+        let last = row_count.saturating_sub(1);
+        let frame_start = frame_start.min(last);
+        let frame_end = frame_end.min(last);
+        if frame_start > frame_end {
+            return;
+        }
+
+        // 采用较浅底色，避免覆盖文本可读性。
+        let bg = ctx.cfg().select_color().linear_multiply(0.14);
+        let painter = ui.painter();
+        let show_indices = ctx.cfg().show_table_row_no;
+        let expand_cell = |cell: &Rect| {
+            cell.expand2(Vec2 {
+                x: table_info.spacing_x / 2.0,
+                y: table_info.spacing_y / 2.0,
+            })
+        };
+
+        for r in frame_start..=frame_end {
+            let logical_row = table_info.row_index.saturating_add(r);
+            let row_checked = current_row_checked && logical_row == table_info.row_index;
+            if row_checked {
+                if let Some(row) = all_cell_rects.get(r) {
+                    for cell in row {
+                        painter.rect_filled(expand_cell(cell), 0.0, bg);
+                    }
+                }
+            }
+
+            if let Some(row) = data_cell_rects.get(r) {
+                for (c, cell) in row.iter().enumerate() {
+                    let col_checked = table_info.head_col_checked.get(c).copied().unwrap_or(false);
+                    if col_checked {
+                        painter.rect_filled(expand_cell(cell), 0.0, bg);
+                    }
+                }
+            }
+
+            if show_indices && logical_row == 0 && table_info.head_index_checked {
+                if let Some(row) = all_cell_rects.get(r) {
+                    if let Some(index_cell) = row.first() {
+                        painter.rect_filled(expand_cell(index_cell), 0.0, bg);
+                    }
+                }
+            }
         }
     }
 
@@ -610,12 +546,13 @@ impl PghView {
             .get_line(cursor.line_no)
             .is_some_and(|p| p.is_table_row());
         let (r, c, rect_row_i) = if is_row {
-            let ti = ctx
-                .get_line(cursor.line_no)
-                .and_then(|p| p.table_info.clone())
-                .unwrap_or_default();
+            let ti = ctx.table_info_of_line(cursor.line_no).cloned().unwrap_or_default();
             let c = segment.min(ti.col_count.saturating_sub(1));
-            (ti.table_row_index, c, 0usize)
+            let r = ctx
+                .table_key_of_line(cursor.line_no)
+                .and_then(|k| ctx.table_row_no(cursor.line_no, k))
+                .unwrap_or(0);
+            (r, c, 0usize)
         } else {
             let r = segment / table_info.col_count;
             let c = segment % table_info.col_count;
@@ -728,89 +665,7 @@ impl PghView {
                 }
                 redo_cmd.set_cursor(ctx.cursor2());
                 ctx.push_do(undo_cmd, redo_cmd);
-            } else {
-                undo_cmd.push_update(cursor.line_no, ctx.get_line_clone(cursor.line_no));
-                if let Some(pgh) = ctx.get_line_mut(cursor.line_no) {
-                    if let Some(row) = insert_row {
-                        pgh.table_insert_row(row);
-                    }
-                    if let Some(col) = insert_col {
-                        pgh.table_insert_col(col);
-                        if let Some(info) = &pgh.table_info {
-                            let mut new_cursor = *cursor;
-                            new_cursor.segment = r * info.col_count + c;
-                            ctx.set_cursor2(new_cursor);
-                            ctx.set_cursor1_reset();
-                        }
-                    }
-                }
-                redo_cmd.push_update(cursor.line_no, ctx.get_line_clone(cursor.line_no));
-                redo_cmd.set_cursor(ctx.cursor2());
-                ctx.push_do(undo_cmd, redo_cmd);
             }
-        }
-    }
-
-    /// 同步行高缓冲长度，并按裁剪区估计需要实际布局的行区间（含 overscan，且包含 `cursor_row`）。
-    fn prepare_table_visible_rows(
-        clip_rect: Rect,
-        grid_top_y: f32,
-        row_heights: &mut Vec<f32>,
-        row_count: usize,
-        default_row_h: f32,
-        cursor_row: usize,
-        overscan: usize,
-    ) -> (usize, usize) {
-        if row_count == 0 {
-            return (0, 0);
-        }
-
-        if row_heights.len() != row_count {
-            row_heights.resize(row_count, default_row_h);
-        }
-
-        let mut acc_y = grid_top_y;
-        let mut visible_start = 0usize;
-        for (i, h) in row_heights.iter().enumerate() {
-            let next = acc_y + *h;
-            if next >= clip_rect.top() {
-                visible_start = i;
-                break;
-            }
-            acc_y = next;
-        }
-
-        acc_y = grid_top_y;
-        let mut visible_end = row_count.saturating_sub(1);
-        for (i, h) in row_heights.iter().enumerate() {
-            let next = acc_y + *h;
-            if acc_y <= clip_rect.bottom() {
-                visible_end = i;
-            }
-            if acc_y > clip_rect.bottom() {
-                break;
-            }
-            acc_y = next;
-        }
-        if visible_end < visible_start {
-            visible_end = visible_start;
-        }
-
-        let mut visible_start = visible_start.saturating_sub(overscan);
-        let mut visible_end = (visible_end + overscan).min(row_count.saturating_sub(1));
-        visible_start = visible_start.min(cursor_row);
-        visible_end = visible_end.max(cursor_row).min(row_count.saturating_sub(1));
-        (visible_start, visible_end)
-    }
-
-    /// 虚拟滚动：小表全量；大表按是否滚动扩大 overscan，减轻空白行。
-    fn table_layout_overscan(row_count: usize, is_scrolling: bool) -> usize {
-        if row_count <= 50 {
-            row_count
-        } else if is_scrolling {
-            40
-        } else {
-            20
         }
     }
 
@@ -836,10 +691,13 @@ impl PghView {
 
     fn table_grid_row_common_metrics(ctx: &Ctx, table_info: &TableInfo) -> (bool, f32, f32, f32) {
         let show_indices = ctx.cfg().show_table_row_no;
-        let index_col_width = Self::table_index_col_width(
+        let mut index_col_width = Self::table_index_col_width(
             table_info.logical_row_count_for_ui(),
             table_info.col_min_width,
         );
+        if ctx.cfg().show_table_head_checkbox {
+            index_col_width += Self::table_head_checkbox_total_width(ctx);
+        }
         let max_col_width = ctx.edit_width();
         let default_row_h = (ctx.font_size() + table_info.spacing_y + 6.0).at_least(18.0);
         (show_indices, index_col_width, max_col_width, default_row_h)
@@ -877,26 +735,58 @@ impl PghView {
         } else {
             Self::table_cell_job(ui, ctx, &index_text)
         };
+        let show_row_checkbox = ctx.cfg().show_table_head_checkbox;
+        let text_width = if show_row_checkbox {
+            (index_col_width - Self::table_head_checkbox_total_width(ctx)).at_least(8.0)
+        } else {
+            index_col_width
+        };
+        let mut cell_size = ui.available_size_before_wrap();
+        cell_size.y = cell_size.y.max(target_h);
+        let row_rsp = ui.allocate_ui_with_layout(
+            cell_size,
+            Layout::left_to_right(Align::Min),
+            |ui| {
+            if show_row_checkbox {
+                let checked = if row == 0 {
+                    table_info.head_index_checked
+                } else {
+                    ctx.get_line(line_no)
+                        .map(|p| p.row_index_checked)
+                        .unwrap_or(false)
+                };
+                let (new_checked, _cb_rsp) =
+                    Self::table_layout_head_checkbox(ui, ctx, checked, true);
+                if row == 0 {
+                    if new_checked != table_info.head_index_checked {
+                        ctx.table_row_block_set_head_index_checked(line_no, new_checked);
+                    }
+                } else if new_checked != checked {
+                    ctx.table_row_block_set_row_index_checked(line_no, row, new_checked);
+                }
+            }
 
-        let mut item_rect = ui.cursor();
-        item_rect.set_width(index_col_width);
-        item_rect.set_height(target_h);
-        let spacing = TextSpacing::text_spacing_in_rect(item_rect, index_col_width)
-            .with_spacing_top_bottom(table_info.spacing_y / 2.0, table_info.spacing_y / 2.0)
-            .with_need_expand(true)
-            .with_once_allocate(true)
-            .with_first_row_indentation(ui);
-        let rsp = PghText::layout_paragraph(
-            ui,
-            ctx,
-            line_no,
-            Self::TABLE_ROW_INDEX_VIEW_SEGMENT,
-            spacing,
-            index_text,
-            &Some(job),
+            let mut item_rect = ui.cursor();
+            item_rect.set_width(text_width);
+            item_rect.set_height(target_h);
+            let spacing = TextSpacing::text_spacing_in_rect(item_rect, text_width)
+                .with_spacing_top_bottom(table_info.spacing_y / 2.0, table_info.spacing_y / 2.0)
+                .with_need_expand(true)
+                .with_once_allocate(true)
+                .with_first_row_indentation(ui);
+            let rsp = PghText::layout_paragraph(
+                ui,
+                ctx,
+                line_no,
+                Self::TABLE_ROW_INDEX_VIEW_SEGMENT,
+                spacing,
+                index_text,
+                &Some(job),
+            );
+            *response |= rsp;
+        },
         );
-        row_cell_rects.push(rsp.rect);
-        *response |= rsp;
+        row_cell_rects.push(row_rsp.response.rect);
     }
 
     fn layout_table_grid_row_finalize(
@@ -906,78 +796,6 @@ impl PghView {
         let row_h = Self::normalize_table_row_cell_rects(&mut row_cell_rects);
         let data_cells = Self::table_data_column_rects(show_indices, &row_cell_rects);
         (row_cell_rects, data_cells, row_h)
-    }
-
-    /// 可见区一行：`PghText` 排版数据格（含空单元格占位）。调用方在本行 push 完后执行 `ui.end_row()`。
-    /// `width_info` 须由 `table_guess_width` 在整张表上只算一次再传入。
-    fn layout_table_grid_row(
-        ui: &mut Ui,
-        ctx: &mut Ctx,
-        line_no: usize,
-        table_info: &TableInfo,
-        row: usize,
-        width_info: &[f32],
-        row_heights: &mut Vec<f32>,
-        response: &mut Response,
-    ) -> (Vec<Rect>, Vec<Rect>, f32) {
-        let (show_indices, index_col_width, max_col_width, default_row_h) =
-            Self::table_grid_row_common_metrics(ctx, table_info);
-
-        let mut row_cell_rects = vec![];
-        if show_indices {
-            let target_h = row_heights[row].max(default_row_h);
-            Self::layout_table_grid_row_push_index_cell(
-                ui,
-                ctx,
-                line_no,
-                table_info,
-                row,
-                index_col_width,
-                target_h,
-                &mut row_cell_rects,
-                true,
-                response,
-            );
-        }
-
-        for c in 0..table_info.col_count {
-            let warp_width = *width_info.get(c).unwrap_or_else(|| &max_col_width);
-            let cell_i = row * table_info.col_count + c;
-            if let Some(pgh_segment) = ctx.get_line(line_no).and_then(|p| p.pgh.get(cell_i)) {
-                let text = pgh_segment.item.text();
-                let job = if row == 0 {
-                    Self::table_head_job(ui, ctx, &text)
-                } else {
-                    Self::table_cell_job(ui, ctx, &text)
-                };
-                let mut item_rect = ui.cursor();
-                item_rect.set_width(warp_width);
-                let spacing = TextSpacing::text_spacing_in_rect(item_rect, warp_width)
-                    .with_spacing_top_bottom(table_info.spacing_y / 2.0, table_info.spacing_y / 2.0)
-                    .with_need_expand(true)
-                    .with_once_allocate(true)
-                    .with_first_row_indentation(ui);
-                let rsp = PghText::layout_paragraph(
-                    ui,
-                    ctx,
-                    line_no,
-                    cell_i,
-                    spacing,
-                    text,
-                    &Some(job),
-                );
-                row_cell_rects.push(rsp.rect);
-                *response |= rsp;
-            } else {
-                let mut placeholder_rect = ui.cursor();
-                placeholder_rect.set_width(warp_width);
-                placeholder_rect.set_height(row_heights[row].max(default_row_h));
-                let rsp = ui.allocate_rect(placeholder_rect, Sense::hover());
-                row_cell_rects.push(rsp.rect);
-            }
-        }
-
-        Self::layout_table_grid_row_finalize(show_indices, row_cell_rects)
     }
 
     /// 单行 `TableRow`：`segment` 即列下标，`row_heights` 长度须为 1。
@@ -992,11 +810,11 @@ impl PghView {
     ) -> (Vec<Rect>, Vec<Rect>, f32) {
         let (show_indices, index_col_width, max_col_width, default_row_h) =
             Self::table_grid_row_common_metrics(ctx, table_info);
-        let r_idx = table_info.table_row_index;
+        let r_idx = table_info.row_index;
+        let rh0 = row_heights.get(0).copied().unwrap_or(default_row_h);
+        let target_h = rh0.max(default_row_h);
         let mut row_cell_rects = vec![];
         if show_indices {
-            let rh0 = row_heights.get(0).copied().unwrap_or(default_row_h);
-            let target_h = rh0.max(default_row_h);
             Self::layout_table_grid_row_push_index_cell(
                 ui,
                 ctx,
@@ -1014,216 +832,62 @@ impl PghView {
         for c in 0..table_info.col_count {
             let warp_width = *width_info.get(c).unwrap_or_else(|| &max_col_width);
             let cell_i = c;
-            if let Some(pgh_segment) = ctx.get_line(line_no).and_then(|p| p.pgh.get(cell_i)) {
-                let text = pgh_segment.item.text();
-                let job = if r_idx == 0 {
-                    Self::table_head_job(ui, ctx, &text)
-                } else {
-                    Self::table_cell_job(ui, ctx, &text)
-                };
-                let mut item_rect = ui.cursor();
-                item_rect.set_width(warp_width);
-                let spacing = TextSpacing::text_spacing_in_rect(item_rect, warp_width)
-                    .with_spacing_top_bottom(table_info.spacing_y / 2.0, table_info.spacing_y / 2.0)
-                    .with_need_expand(true)
-                    .with_once_allocate(true)
-                    .with_first_row_indentation(ui);
-                let rsp = PghText::layout_paragraph(
-                    ui,
-                    ctx,
-                    line_no,
-                    cell_i,
-                    spacing,
-                    text,
-                    &Some(job),
-                );
-                row_cell_rects.push(rsp.rect);
-                *response |= rsp;
+            let show_head_checkbox = r_idx == 0 && ctx.cfg().show_table_head_checkbox;
+            let text_width = if show_head_checkbox {
+                (warp_width - Self::table_head_checkbox_total_width(ctx)).at_least(8.0)
             } else {
-                let mut placeholder_rect = ui.cursor();
-                placeholder_rect.set_width(warp_width);
-                let rh0 = row_heights.get(0).copied().unwrap_or(default_row_h);
-                placeholder_rect.set_height(rh0.max(default_row_h));
-                let rsp = ui.allocate_rect(placeholder_rect, Sense::hover());
-                row_cell_rects.push(rsp.rect);
-            }
-        }
-
-        Self::layout_table_grid_row_finalize(show_indices, row_cell_rects)
-    }
-
-    /// 虚拟化不可见行：仅按缓存行高占位，不跑 `PghText`。
-    fn layout_table_grid_row_placeholder(
-        ui: &mut Ui,
-        ctx: &mut Ctx,
-        line_no: usize,
-        table_info: &TableInfo,
-        row: usize,
-        width_info: &[f32],
-        row_heights: &mut Vec<f32>,
-        response: &mut Response,
-    ) -> (Vec<Rect>, Vec<Rect>, f32) {
-        let (show_indices, index_col_width, max_col_width, _default_row_h) =
-            Self::table_grid_row_common_metrics(ctx, table_info);
-
-        let mut row_cell_rects = vec![];
-        if show_indices {
-            let target_h = row_heights[row];
-            Self::layout_table_grid_row_push_index_cell(
-                ui,
-                ctx,
-                line_no,
-                table_info,
-                row,
-                index_col_width,
-                target_h,
-                &mut row_cell_rects,
-                false,
-                response,
-            );
-        }
-
-        for col in 0..table_info.col_count {
-            let warp_width = *width_info.get(col).unwrap_or_else(|| &max_col_width);
-            let mut placeholder_rect = ui.cursor();
-            placeholder_rect.set_width(warp_width);
-            placeholder_rect.set_height(row_heights[row]);
-            let rsp = ui.allocate_rect(placeholder_rect, Sense::hover());
-            row_cell_rects.push(rsp.rect);
-        }
-
-        Self::layout_table_grid_row_finalize(show_indices, row_cell_rects)
-    }
-
-    pub fn layout_table(ui: &mut Ui, ctx: &mut Ctx, line_no: usize) -> Response {
-        let mut response = ui.allocate_exact_size(vec2(0.0, 0.0), ctx.sense()).1;
-
-        let width_info = {
-            let Some(p) = ctx.get_line(line_no) else {
-                return response;
+                warp_width
             };
-            p.table_guess_width(ui, ctx)
-        };
-        let max_col_width = ctx.edit_width();
-        let Some(table_info) = ctx.get_line(line_no).and_then(|p| p.table_info.clone()) else {
-            return response;
-        };
-        if table_info.row_count == 0 {
-            return response;
-        }
-
-        let cursor = ctx.cursor2();
-        let cursor_row = cursor.segment / table_info.col_count;
-
-        let default_row_h = (ctx.font_size() + table_info.spacing_y + 6.0).at_least(18.0);
-        let is_scrolling = ui.ctx().input(|i| {
-            i.raw_scroll_delta.y.abs() > 0.0 || i.smooth_scroll_delta.y.abs() > 0.0
-        });
-        let overscan = Self::table_layout_overscan(table_info.row_count, is_scrolling);
-
-        let mut row_heights = {
-            let mut v = ctx
-                .get_line(line_no)
-                .map(|p| p.table_row_heights.borrow().clone())
-                .unwrap_or_default();
-            if v.len() < table_info.row_count {
-                v.resize(table_info.row_count, default_row_h);
-            } else {
-                v.truncate(table_info.row_count);
-            }
-            v
-        };
-
-        let (visible_start, visible_end) = Self::prepare_table_visible_rows(
-            ui.clip_rect(),
-            ui.cursor().top(),
-            &mut row_heights,
-            table_info.row_count,
-            default_row_h,
-            cursor_row,
-            overscan,
-        );
-
-        ui.horizontal(|ui| {
-            PghIndent::layout_paragraph(ui, ctx, line_no, 0, ctx.cfg().indent_size);
-            let table_id = format!("table_id_{}", line_no);
-
-            let _grid = Grid::new(&table_id)
-                .striped(table_info.frame_style == TableFrameStyle::None)
-                .num_columns(
-                    table_info.col_count + if ctx.cfg().show_table_row_no { 1 } else { 0 },
-                )
-                .min_col_width(0.0)
-                .min_row_height(0.0)
-                .max_col_width(max_col_width)
-                .spacing(Vec2 {
-                    x: table_info.spacing_x,
-                    y: table_info.spacing_y,
-                })
-                .show(ui, |ui| {
-                    let mut all_cell_rects = vec![];
-                    let mut data_cell_rects = vec![];
-
-                    for r in 0..table_info.row_count {
-                        let render_row = r == 0
-                            || r == cursor_row
-                            || (r >= visible_start && r <= visible_end);
-
-                        let (row_cells, data_cells, row_h) = if render_row {
-                            Self::layout_table_grid_row(
-                                ui,
-                                ctx,
-                                line_no,
-                                &table_info,
-                                r,
-                                &width_info,
-                                &mut row_heights,
-                                &mut response,
-                            )
-                        } else {
-                            Self::layout_table_grid_row_placeholder(
-                                ui,
-                                ctx,
-                                line_no,
-                                &table_info,
-                                r,
-                                &width_info,
-                                &mut row_heights,
-                                &mut response,
-                            )
-                        };
-                        ui.end_row();
-
-                        if render_row {
-                            row_heights[r] = row_h.at_least(1.0);
-                        }
-                        all_cell_rects.push(row_cells);
-                        data_cell_rects.push(data_cells);
+            let mut cell_size = ui.available_size_before_wrap();
+            cell_size.y = cell_size.y.max(target_h);
+            let cell_rsp = ui.allocate_ui_with_layout(
+                cell_size,
+                Layout::left_to_right(Align::Min),
+                |ui| {
+                if show_head_checkbox {
+                    let checked = table_info.head_col_checked.get(c).copied().unwrap_or(false);
+                    let (new_checked, _cb_rsp) =
+                        Self::table_layout_head_checkbox(ui, ctx, checked, true);
+                    if new_checked != checked {
+                        ctx.table_row_block_set_head_col_checked(line_no, c, new_checked);
                     }
-
-                    // 视口行 + overscan，上下各扩一行，减少大表滚动时表格线断层
-                    let frame_start = visible_start.saturating_sub(1);
-                    let frame_end = (visible_end + 1).min(table_info.row_count.saturating_sub(1));
-                    Self::table_draw_frame(
+                }
+                if let Some(pgh_segment) = ctx.get_line(line_no).and_then(|p| p.pgh.get(cell_i)) {
+                    let text = pgh_segment.item.text();
+                    let job = if r_idx == 0 {
+                        Self::table_head_job(ui, ctx, &text)
+                    } else {
+                        Self::table_cell_job(ui, ctx, &text)
+                    };
+                    let mut item_rect = ui.cursor();
+                    item_rect.set_width(text_width);
+                    let spacing = TextSpacing::text_spacing_in_rect(item_rect, text_width)
+                        .with_spacing_top_bottom(table_info.spacing_y / 2.0, table_info.spacing_y / 2.0)
+                        .with_need_expand(true)
+                        .with_once_allocate(true);
+                    let rsp = PghText::layout_paragraph(
                         ui,
                         ctx,
-                        &table_info,
-                        &all_cell_rects,
-                        frame_start,
-                        frame_end,
+                        line_no,
+                        cell_i,
+                        spacing,
+                        text,
+                        &Some(job),
                     );
-
-                    if cursor.line_no == line_no && !ctx.is_selected() && !ctx.cfg().is_read_only {
-                        Self::table_draw_buttons(ui, ctx, &cursor, &table_info, &data_cell_rects);
-                    }
-                });
-        });
-
-        if let Some(p) = ctx.get_line_mut(line_no) {
-            *p.table_row_heights.borrow_mut() = row_heights;
+                    *response |= rsp;
+                } else {
+                    let mut placeholder_rect = ui.cursor();
+                    placeholder_rect.set_width(text_width);
+                    let rh0 = row_heights.get(0).copied().unwrap_or(default_row_h);
+                    placeholder_rect.set_height(rh0.max(default_row_h));
+                    let _ = ui.allocate_rect(placeholder_rect, Sense::hover());
+                }
+            },
+            );
+            row_cell_rects.push(cell_rsp.response.rect);
         }
 
-        response
+        Self::layout_table_grid_row_finalize(show_indices, row_cell_rects)
     }
 
     pub fn layout_table_row(ui: &mut Ui, ctx: &mut Ctx, line_no: usize) -> Response {
@@ -1231,9 +895,14 @@ impl PghView {
 
         let width_info = ctx.table_guess_width_for_table_row_block(line_no, ui);
         let max_col_width = ctx.edit_width();
-        let Some(table_info) = ctx.get_line(line_no).and_then(|p| p.table_info.clone()) else {
+        let Some(mut table_info) = ctx.table_info_of_line(line_no).cloned() else {
             return response;
         };
+        if let Some(table_key) = ctx.table_key_of_line(line_no) {
+            if let Some(row_no) = ctx.table_row_no(line_no, table_key) {
+                table_info.row_index = row_no;
+            }
+        }
         if table_info.col_count == 0 {
             return response;
         }
@@ -1261,11 +930,11 @@ impl PghView {
             PghIndent::layout_paragraph(ui, ctx, line_no, 0, ctx.cfg().indent_size);
             let table_id = format!(
                 "table_row_id_{}_{}",
-                line_no, table_info.table_row_index
+                line_no, table_info.row_index
             );
 
             // TableRow 每行一个 Grid（仅一行）
-            let grid = Grid::new(&table_id)
+            let _grid = Grid::new(&table_id)
                 .striped(table_info.frame_style == TableFrameStyle::None)
                 .num_columns(
                     table_info.col_count + if ctx.cfg().show_table_row_no { 1 } else { 0 },
@@ -1295,6 +964,16 @@ impl PghView {
                     all_cell_rects.push(row_cells);
                     data_cell_rects.push(data_cells);
 
+                    Self::table_draw_checked_background(
+                        ui,
+                        ctx,
+                        &table_info,
+                        ctx.get_line(line_no).map(|p| p.row_index_checked).unwrap_or(false),
+                        &all_cell_rects,
+                        &data_cell_rects,
+                        0,
+                        0,
+                    );
                     Self::table_draw_frame(ui, ctx, &table_info, &all_cell_rects, 0, 0);
 
                     if cursor.line_no == line_no && !ctx.is_selected() && !ctx.cfg().is_read_only {
@@ -1319,17 +998,23 @@ impl PghView {
     pub fn layout_table_row_line(ui: &mut Ui, ctx: &mut Ctx, line_no: usize) -> LayoutResponse {
         let mut response = ui.allocate_exact_size(vec2(0.0, 0.0), ctx.sense()).1;
         let handled = false;
-        let Some(table_info) = ctx.get_line(line_no).and_then(|p| p.table_info.clone()) else {
-            return LayoutResponse::new(response.on_hover_cursor(CursorIcon::Text), handled);
+        let Some(mut table_info) = ctx.table_info_of_line(line_no).cloned() else {
+            let response = response.on_hover_cursor(CursorIcon::Text);
+            return LayoutResponse::new(response.clone(), response, handled);
         };
+        if let Some(table_key) = ctx.table_key_of_line(line_no) {
+            if let Some(row_no) = ctx.table_row_no(line_no, table_key) {
+                table_info.row_index = row_no;
+            }
+        }
         {
             let size = icon_button_builder(ui)
                 .icon(IconName::icon_chevron_down)
                 .font_size(12.0)
                 .size();
-            let total_rows = table_info.table_total_rows.max(1);
-            let is_first_row = table_info.table_row_index == 0;
-            let is_last_row = table_info.table_row_index + 1 >= total_rows;
+            let total_rows = table_info.row_count.max(1);
+            let is_first_row = table_info.row_index == 0;
+            let is_last_row = table_info.row_index + 1 >= total_rows;
             let top_band = if is_first_row { size.y } else { 0.0 };
             let bottom_band = if is_last_row { size.y } else { 0.0 };
 
@@ -1374,57 +1059,7 @@ impl PghView {
         }
 
         let response = response.on_hover_cursor(CursorIcon::Text);
-        LayoutResponse::new(response, handled)
+        LayoutResponse::new(response.clone(), response, handled)
     }
 
-    pub fn layout_table_line(ui: &mut Ui, ctx: &mut Ctx, line_no: usize) -> LayoutResponse {
-        let mut response = ui.allocate_exact_size(vec2(0.0, 0.0), ctx.sense()).1;
-        let handled = false;
-        let Some(table_info) = ctx.get_line(line_no).and_then(|p| p.table_info.clone()) else {
-            return LayoutResponse::new(response.on_hover_cursor(CursorIcon::Text), handled);
-        };
-        {
-            //top space
-            let size = icon_button_builder(ui)
-                .icon(IconName::icon_chevron_down)
-                .font_size(12.0)
-                .size();
-            ui.allocate_exact_size(vec2(0.0, size.y), ctx.sense()).1;
-
-            ctx.update_spacing(
-                line_no,
-                table_info.spacing_y / 2.0,
-                table_info.spacing_y / 2.0,
-            );
-
-            ui.horizontal(|ui| {
-                ui.allocate_exact_size(vec2(table_info.spacing_indent, 0.0), ctx.sense());
-                let rsp = Self::layout_table(ui, ctx, line_no);
-                
-                //table rect inclue frame and icon_space_x
-                let table_rect = rsp.rect.expand2(Vec2 { x: table_info.spacing_x/2.0, y: table_info.spacing_y/2.0});    //include frame
-                let table_rect = table_rect.expand2(Vec2 { x: size.x, y: 0.0 });  //include icon_space_x
-                //ui.painter().rect_stroke(table_rect, 0.0, Stroke::new(0.5, Color32::RED), StrokeKind::Outside);
-                response |= rsp;
-
-                //add right space
-                if table_rect.right() < ctx.edit_right() {
-                    let mut right_rect = table_rect; 
-                    right_rect.set_left(table_rect.right());
-                    right_rect.set_right(ctx.edit_right());
-                    response |= ui.allocate_rect(right_rect, ctx.sense());
-                }
-            });
-
-            //bottom space
-            let mut bottom_rect = ui.cursor();
-            bottom_rect.set_right(ctx.edit_right());
-            bottom_rect.set_height(size.y);
-            response |= ui.allocate_rect(bottom_rect, ctx.sense());
-            //response |= ui.allocate_exact_size(vec2(0.0, size.y), ctx.sense()).1;
-        }
-
-        let response = response.on_hover_cursor(CursorIcon::Text);
-        LayoutResponse::new(response, handled)
-    }
 }

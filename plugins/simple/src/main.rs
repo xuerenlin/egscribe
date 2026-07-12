@@ -82,22 +82,7 @@ impl PluginHandler for SimplePlugin {
     ) -> io::Result<()> {
         match event_type.as_str() {
             "line_changed" => {
-                let line_no = data.get("line_no").and_then(|v| v.as_u64()).unwrap_or(0);
-                let line_text = data
-                    .get("line_text")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-
-                let preview = if line_text.len() > 50 {
-                    format!("{}...", &line_text[..50])
-                } else {
-                    line_text
-                };
-                api.notify(
-                    "info",
-                    format!("Received line_changed event: line {} = '{}'", line_no, preview),
-                )?;
+                // 行变化事件不再发送通知，避免高频刷屏
             }
             "file_opened" => {
                 let file_path = data

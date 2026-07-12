@@ -181,6 +181,42 @@ pub enum IconName {
     icon_puzzle, //e9b1
     icon_mic, //e9b2
     icon_hash, //e9c7
+    icon_functions, //e9da
+    icon_notification, //e9dc
+    icon_info, //e9dd
+    icon_info1, //e9de
+    icon_table_view, //e9df
+    icon_media_fast_forward_outline, //e9e0
+    icon_media_fast_forward, //e9e1
+    icon_minus, //e9e2
+    icon_plus, //e9e3
+    icon_bandcamp, //e9e4
+    icon_page_break, //e9e5
+    icon_wysiwyg, //e9e5
+    icon_embed, //e9e6
+    icon_embed1, //e9e7
+    icon_table, //e9e8
+    icon_list, //e9e9
+    icon_list_numbered, //e9ea
+    icon_list2, //e9cc
+    icon_todo1, //e9cd
+    icon_delete1, //e909
+    icon_h_square, //e9eb
+    icon_strikethrough, //e9ec
+    icon_border_all, //e9ed
+    icon_trash, //e9ee
+    icon_clipboard, //e9ef
+    icon_edit_crop, //e9f0
+    icon_copy, //e9f1
+    icon_border_horizontal, //e9f2
+    icon_code1, //e9f4
+    icon_link, //e9f5
+    icon_format_italic, //e9f6
+    icon_format_bold, //e9f7
+    icon_window_close, //e9f8 icon-close
+    icon_window_minimize, //e9f9 icon-minus
+    icon_window_maximize, //e9fa icon-window-maximize
+    icon_window_restore, //e9fb icon-window-restore
 }
 
 impl IconName {
@@ -366,6 +402,42 @@ impl IconName {
             IconName::icon_puzzle => '\u{e9b1}',
             IconName::icon_mic => '\u{e9b2}',
             IconName::icon_hash => '\u{e9c7}',
+            IconName::icon_functions => '\u{e9da}',
+            IconName::icon_notification => '\u{e9dc}',
+            IconName::icon_info => '\u{e9dd}',
+            IconName::icon_info1 => '\u{e9de}',
+            IconName::icon_table_view => '\u{e9df}',
+            IconName::icon_media_fast_forward_outline => '\u{e9e0}',
+            IconName::icon_media_fast_forward => '\u{e9e1}',
+            IconName::icon_minus => '\u{e9e2}',
+            IconName::icon_plus => '\u{e9e3}',
+            IconName::icon_bandcamp => '\u{e9e4}',
+            IconName::icon_page_break => '\u{e9e5}',
+            IconName::icon_wysiwyg => '\u{e9e5}',
+            IconName::icon_embed => '\u{e9e6}',
+            IconName::icon_embed1 => '\u{e9e7}',
+            IconName::icon_table => '\u{e9e8}',
+            IconName::icon_list => '\u{e9e9}',
+            IconName::icon_list_numbered => '\u{e9ea}',
+            IconName::icon_list2 => '\u{e9cc}',
+            IconName::icon_todo1 => '\u{e9cd}',
+            IconName::icon_delete1 => '\u{e909}',
+            IconName::icon_h_square => '\u{e9eb}',
+            IconName::icon_strikethrough => '\u{e9ec}',
+            IconName::icon_border_all => '\u{e9ed}',
+            IconName::icon_trash => '\u{e9ee}',
+            IconName::icon_clipboard => '\u{e9ef}',
+            IconName::icon_edit_crop => '\u{e9f0}',
+            IconName::icon_copy => '\u{e9f1}',
+            IconName::icon_border_horizontal => '\u{e9f2}',
+            IconName::icon_code1 => '\u{e9f4}',
+            IconName::icon_link => '\u{e9f5}',
+            IconName::icon_format_italic => '\u{e9f6}',
+            IconName::icon_format_bold => '\u{e9f7}',
+            IconName::icon_window_close => '\u{e9f8}',
+            IconName::icon_window_minimize => '\u{e9f9}',
+            IconName::icon_window_maximize => '\u{e9fa}',
+            IconName::icon_window_restore => '\u{e9fb}',
         }
     }
 }

@@ -27,7 +27,7 @@ Write-Host "Copying plugin files to $PluginsDir..."
 $PluginFolders = Get-ChildItem -Path (Join-Path $ScriptDir "plugins") -Directory
 foreach ($Plugin in $PluginFolders) {
     $PluginName = $Plugin.Name
-    if ($PluginName -eq "plugin_sdk") {
+    if ($PluginName -eq "plugin_sdk" -or $PluginName -eq "sitter") {
         Write-Host "  Skipping internal crate: $PluginName"
         continue
     }
@@ -89,6 +89,13 @@ foreach ($Plugin in $PluginFolders) {
         if (Test-Path $PluginDescFile) {
             Copy-Item -Path $PluginDescFile -Destination (Join-Path $PluginDstDir "desc.json") -Force
             Write-Host "  [OK] Created desc.json for Rust plugin: $PluginName"
+        }
+
+        Get-ChildItem -Path $PluginDir -File -Filter "*.md" -ErrorAction SilentlyContinue | Where-Object {
+            -not $_.Name.EndsWith(".example")
+        } | ForEach-Object {
+            Copy-Item -Path $_.FullName -Destination (Join-Path $PluginDstDir $_.Name) -Force
+            Write-Host "  [OK] Copied markdown resource: $($_.Name)"
         }
     }
 }

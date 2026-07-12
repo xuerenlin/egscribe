@@ -3,7 +3,7 @@ use std::cell::RefCell;
 use dyn_clone::DynClone;
 use eframe::egui::epaint::text::LayoutJob;
 use eframe::egui::{
-    NumExt, Pos2, Rect, Response, RichText, Ui, Widget,
+    Label, NumExt, Pos2, Rect, Response, RichText, Sense, Ui, Widget,
     vec2, CursorIcon,
 };
 use crate::medit::{Cursor, Ctx, MarkDownImpl, LinkInfo, Edit};
@@ -15,10 +15,14 @@ mod pgh_items;
 mod pgh_code;
 mod pgh_table;
 pub use pgh_items::{
-    PghBreak, PghCheckBox, PghIcon, PghImage, PghIndent, PghPoint, PghQuoteIndent, QUOTE_INDENT_WIDTH,
+    PghBreak, PghCheckBox, PghIcon, PghImage, PghIndent, PghOutlineFold, PghPoint, PghQuoteIndent,
+    QUOTE_INDENT_WIDTH,
 };
+#[allow(dead_code)]
 pub type CodeLangMenu<'a> = pgh_code::CodeLangMenu<'a>;
 pub use pgh_table::{TableFrameStyle, TableInfo};
+pub type TableKey = u64;
+pub type CodeKey = u64;
 
 /// fenced 代码块内一行（`PghType::CodeRow`），与 `TableInfo` 行下标语义对齐
 #[derive(Clone, Debug, PartialEq)]
@@ -60,6 +64,7 @@ pub enum SegmentType {
     Break,
     Icon,
     Image,
+    OutlineFold,
 }
 
 pub trait PghItem: DynClone {
@@ -71,35 +76,35 @@ pub trait PghItem: DynClone {
         None
     }
 
-    fn layout_job_update(&mut self, job: Option<LayoutJob>) {}
+    fn layout_job_update(&mut self, _job: Option<LayoutJob>) {}
 
-    fn update_view_info(&mut self, char_rect: Vec<CharRect>) {}
+    fn update_view_info(&mut self, _char_rect: Vec<CharRect>) {}
 
-    fn cursor_from_pos(&self, line_no: usize, segment: usize, pos: &Pos2) -> Option<Cursor> {
+    fn cursor_from_pos(&self, _line_no: usize, _segment: usize, _pos: &Pos2) -> Option<Cursor> {
         None
     }
 
-    fn pos_from_cursor(&self, cursor: &Cursor) -> Option<Rect> {
+    fn pos_from_cursor(&self, _cursor: &Cursor) -> Option<Rect> {
         None
     }
 
-    fn delete(&self, line_no: usize, segment: usize, c1: &Cursor, c2: &Cursor) -> Option<String> {
+    fn delete(&self, _line_no: usize, _segment: usize, _c1: &Cursor, _c2: &Cursor) -> Option<String> {
         Some("".to_string())
     }
 
-    fn select(&self, line_no: usize, segment: usize, c1: &Cursor, c2: &Cursor, keep_pos: bool) -> Option<String> {
+    fn select(&self, _line_no: usize, _segment: usize, _c1: &Cursor, _c2: &Cursor, _keep_pos: bool) -> Option<String> {
         Some("".to_string())
     }
 
-    fn insert(&self, c: &Cursor) -> (String, String) {
+    fn insert(&self, _c: &Cursor) -> (String, String) {
         ("".to_string(), "".to_string())
     }
 
-    fn enter(&self, c: &Cursor) -> (String, String) {
+    fn enter(&self, _c: &Cursor) -> (String, String) {
         ("".to_string(), "".to_string())
     }
 
-    fn update_text(&mut self, text: String) {}
+    fn update_text(&mut self, _text: String) {}
 
     fn max_culumn(&self) -> usize {
         0
@@ -116,6 +121,12 @@ pub trait PghItem: DynClone {
     fn link_info(&self) -> Option<LinkInfo> {
         None
     }
+
+    fn outline_fold_collapsed(&self) -> Option<bool> {
+        None
+    }
+
+    fn set_outline_fold_collapsed(&mut self, _collapsed: bool) {}
 }
 
 impl Clone for Box<dyn PghItem> {
@@ -164,18 +175,34 @@ impl PghSegment {
 #[derive(Clone, Debug)]
 pub struct LayoutResponse {
     pub response: Response,
+    /// 独立控件（OutlineFold / CheckBox / Break 等）的响应，不并入 `response` 以免干扰正文光标；
+    /// 与 `response` 合并后用于申请编辑器焦点。
+    pub focus_response: Response,
     /// 标志子控件是否已经响应事件，上层不需要再响应事件
     pub handled: bool,
 }
 
 impl LayoutResponse {
-    pub fn new(response: Response, handled: bool) -> Self {
-        LayoutResponse { response, handled }
+    pub fn new(response: Response, focus_response: Response, handled: bool) -> Self {
+        LayoutResponse {
+            response,
+            focus_response,
+            handled,
+        }
     }
 
     /// 从 Response 创建，默认 handled 为 false
     pub fn from_response(response: Response) -> Self {
-        LayoutResponse { response, handled: false }
+        LayoutResponse {
+            response: response.clone(),
+            focus_response: response,
+            handled: false,
+        }
+    }
+
+    /// 用于申请焦点的合并响应（正文区 + 独立控件 + 行号等）
+    pub fn focus_target(&self) -> Response {
+        self.response.clone() | self.focus_response.clone()
     }
 }
 
@@ -187,7 +214,6 @@ pub enum PghType {
     BreakLine,
     BlockLine,
     ListItem,
-    Table,
     /// 表格的一行，对应编辑器中的一行 `PghView`，`pgh` 仅含 `col_count` 个单元格 segment
     TableRow,
     /// 代码块的一行，对应编辑器中的一行 `PghView`，通常仅含一个文本 segment
@@ -202,16 +228,24 @@ pub struct PghView {
     pub rect: Option<Rect>,
     pub spacing_top: f32,
     pub spacing_bottom: f32,
-    pub table_info: Option<TableInfo>,
-    pub code_info: Option<CodeInfo>,
+    pub table_key: Option<TableKey>,
+    pub code_key: Option<CodeKey>,
     pub code_lang: Option<String>,
     pub change_tick: usize,
     pub refresh_tick: usize,
     pub expanded_text_id: Option<u64>,
+    /// 行号列 checkbox（当前行）勾选状态，仅用于 `TableRow`
+    pub row_index_checked: bool,
     /// 表格行高缓存（仅用于可见区虚拟化占位，不参与业务状态）
     pub(crate) table_row_heights: RefCell<Vec<f32>>,
     /// 上一帧该行布局高度，用于 `ScrollArea::show_viewport` 前缀和；0 表示尚未测量，用 `font_heigh` 估计
     pub(crate) last_scroll_height: f32,
+    /// 被各级标题折叠隐藏（下标 0 = 被 1 级标题折叠，依此类推）
+    pub hidden_by_level: [bool; 6],
+    /// 被实时搜索过滤隐藏
+    pub hidden_by_find_filter: bool,
+    /// 标题级别缓存（1..=6），仅 `PghType::Heading`
+    pub heading_level: Option<u8>,
 }
 
 impl PghView {
@@ -222,15 +256,103 @@ impl PghView {
             rect: None,
             spacing_top: 0.0,
             spacing_bottom: 0.0,
-            table_info: None,
-            code_info: None,
+            table_key: None,
+            code_key: None,
             code_lang: None,
             change_tick: 1,
             refresh_tick: 0,
             expanded_text_id: None,
+            row_index_checked: false,
             table_row_heights: RefCell::new(Vec::new()),
             last_scroll_height: 0.0,
+            hidden_by_level: [false; 6],
+            hidden_by_find_filter: false,
+            heading_level: None,
         }
+    }
+
+    pub fn is_outline_hidden(&self) -> bool {
+        self.hidden_by_level.iter().any(|&h| h)
+    }
+
+    pub fn is_render_hidden(&self) -> bool {
+        self.is_outline_hidden() || self.hidden_by_find_filter
+    }
+
+    pub fn line_flash_reset(&mut self) -> bool {
+        let changed = self.refresh_tick > 0;
+        self.refresh_tick = 0;
+        changed
+    }
+
+    pub fn line_flash_tick(&mut self) {
+        self.refresh_tick += 1;
+    }
+
+    pub fn set_find_filter_hidden(&mut self, hidden: bool) {
+        if self.hidden_by_find_filter != hidden {
+            if hidden {
+                self.rect = None;
+                self.last_scroll_height = 0.0;
+            }
+            self.line_flash_tick();
+            self.hidden_by_find_filter = hidden;
+        }
+        
+    }
+
+    pub fn set_hidden_at_level(&mut self, level: u8, hidden: bool) {
+        if !(1..=6).contains(&level) {
+            return;
+        }
+        let idx = (level - 1) as usize;
+        if self.hidden_by_level[idx] != hidden {
+            if hidden {
+                self.rect = None;
+                self.last_scroll_height = 0.0;
+            }
+            self.line_flash_tick();
+            self.hidden_by_level[idx] = hidden;
+        }
+    }
+
+    pub fn outline_fold_segment_index(&self) -> Option<usize> {
+        self.pgh
+            .iter()
+            .position(|s| s.seg_type == SegmentType::OutlineFold)
+    }
+
+    pub fn outline_fold_collapsed(&self) -> Option<bool> {
+        self.pgh
+            .iter()
+            .find(|s| s.seg_type == SegmentType::OutlineFold)
+            .and_then(|s| s.item.outline_fold_collapsed())
+    }
+
+    pub fn set_outline_fold_collapsed_on_segment(&mut self, collapsed: bool) {
+        if let Some(i) = self.outline_fold_segment_index() {
+            if let Some(seg) = self.pgh.get_mut(i) {
+                seg.item.set_outline_fold_collapsed(collapsed);
+            }
+        }
+    }
+
+    pub fn ensure_outline_fold_segment(&mut self, collapsed: bool) {
+        if self.pgh_type != PghType::Heading {
+            return;
+        }
+        if let Some(i) = self.outline_fold_segment_index() {
+            if i + 1 != self.pgh.len() {
+                let seg = self.pgh.remove(i);
+                self.pgh.push(seg);
+            }
+        } else {
+            self.pgh.push(PghSegment::new(
+                SegmentType::OutlineFold,
+                Box::new(PghOutlineFold::new(collapsed)),
+            ));
+        }
+        self.set_outline_fold_collapsed_on_segment(collapsed);
     }
 
     pub fn new_text() -> Self {
@@ -288,8 +410,8 @@ impl PghView {
         let change_tick = self.change_tick;
         let refresh_tick = self.refresh_tick;
         let expanded_text_id = self.expanded_text_id;
-        let table_info = self.table_info.clone();
-        let code_info = self.code_info.clone();
+        let table_key = self.table_key;
+        let code_key = self.code_key;
         let code_lang = self.code_lang.clone();
 
         let pgh = self.pgh;
@@ -311,8 +433,8 @@ impl PghView {
             line.change_tick = change_tick;
             line.refresh_tick = refresh_tick;
             line.expanded_text_id = expanded_text_id;
-            line.table_info = table_info.clone();
-            line.code_info = code_info.clone();
+            line.table_key = table_key;
+            line.code_key = code_key;
             line.code_lang = code_lang.clone();
             line.pgh = prefix.clone();
             line.pgh.extend(suffix);
@@ -450,6 +572,10 @@ impl PghView {
             .push(PghSegment::new(SegmentType::Image, Box::new(PghImage::new(image_info))));
     }
 
+    pub fn push_outline_fold(&mut self, collapsed: bool) {
+        self.ensure_outline_fold_segment(collapsed);
+    }
+
     pub fn is_pos_in(&self, pos: &Pos2) -> bool {
         if let Some(rect) = self.rect {
             if pos.x >= rect.left_top().x
@@ -487,10 +613,11 @@ impl PghView {
         false
     }
 
-    pub fn first_same_y_segment(&self, pos: &Pos2) -> usize {
+    pub fn first_same_y_text_segment(&self, pos: &Pos2) -> usize {
         for (i, segment) in self.pgh.iter().enumerate() {
             if let Some(rect) = segment.rect {
-                if rect.left_top().y <= pos.y && rect.right_bottom().y >= pos.y {
+                if rect.left_top().y <= pos.y && rect.right_bottom().y >= pos.y 
+                    && segment.seg_type == SegmentType::Text {
                     return i
                 }
             }
@@ -514,24 +641,28 @@ impl PghView {
         self.rect
     }
 
+    /// 用 `anchor_rect` 与各行内已有片段的 [`PghSegment::rect`] 求并集，写回本行 [`Self::rect`]。
+    pub fn merge_pgh_rect_from_segments(&mut self, anchor_rect: Rect) {
+        if self.rect.is_some() {
+            let mut new_rect = anchor_rect;
+            for sub_segment in &self.pgh {
+                if let Some(seg_rect) = sub_segment.rect {
+                    new_rect = new_rect.union(seg_rect);
+                }
+            }
+            self.rect = Some(new_rect);
+        } else {
+            self.rect = Some(anchor_rect);
+        }
+    }
+
     pub fn update_view_info(&mut self, segment: usize, rect: Rect, char_rect: Vec<CharRect>) {
         if let Some(pgh_segment) = self.pgh.get_mut(segment) {
             //segment rect info:
             pgh_segment.rect = Some(rect);
             pgh_segment.item.update_view_info(char_rect.clone());
 
-            //merge rect
-            if None != self.rect {
-                let mut new_rect = rect;
-                for sub_segment in &self.pgh {
-                    if let Some(seg_rect) = sub_segment.rect {
-                        new_rect = new_rect.union(seg_rect)
-                    }
-                }
-                self.rect = Some(new_rect);
-            } else {
-                self.rect = Some(rect);
-            }
+            self.merge_pgh_rect_from_segments(rect);
         }
     }
 
@@ -634,7 +765,7 @@ impl PghView {
     }
 
     /// 列矩形与单元格相交时的字符范围，语义与 `PghText::get_delete` 一致（`en` 为较大一端光标，含于半开区间判定）。
-    fn table_row_column_block_cell_span(
+    pub(crate) fn table_row_column_block_cell_span(
         line_no: usize,
         seg: usize,
         line_lo: usize,
@@ -819,6 +950,7 @@ impl PghView {
     /// 同一块 `TableRow` 跨物理行的列矩形：`is_raw` 为拼接单元格原文；`false` 时仅一行 `|...|`（完整 GFM 小表由 `Ctx` 组装）
     pub fn select_table_row_column_block(
         &self,
+        ctx: &Ctx,
         line_no: usize,
         c1: &Cursor,
         c2: &Cursor,
@@ -829,7 +961,7 @@ impl PghView {
         is_raw: bool,
     ) -> String {
         if !self.is_table_row() {
-            return self.select(line_no, c1, c2, is_raw);
+            return self.select(ctx, line_no, c1, c2, is_raw);
         }
         if is_raw {
             let mut out = String::new();
@@ -863,18 +995,19 @@ impl PghView {
     }
 
     //return text that join all segment text
-    pub fn select(&self, line_no: usize, c1: &Cursor, c2: &Cursor, is_raw: bool) -> String {
+    pub fn select(&self, ctx: &Ctx, line_no: usize, c1: &Cursor, c2: &Cursor, is_raw: bool) -> String {
         if is_raw {
             return self.select_to_vec(line_no, c1, c2, false).join("");
         }
         
-        if let Some(table_info) = &self.table_info {
+        if let Some(table_info) = ctx.table_info_of_line(line_no) {
             let arr = self.select_to_vec(line_no, c1, c2, true);
             let min = std::cmp::min(c1, c2);
             let max = std::cmp::max(c1, c2);
 
             if self.is_table_row() {
-                let segmax_row = table_info.col_count.saturating_sub(1);
+                let col_count = self.pgh.len().max(1);
+                let segmax_row = col_count.saturating_sub(1);
                 let range = if line_no < min.line_no || line_no > max.line_no {
                     (0, 0)
                 } else if line_no == min.line_no && line_no == max.line_no {
@@ -905,12 +1038,17 @@ impl PghView {
                         joins.push('|');
                     }
                     // 表头后补分隔行（整块导出 / 局部选表头）
-                    let append_after_header = table_info.table_row_index == 0
-                        && table_info.table_total_rows > 1
+                    let (blk_s, blk_e) = ctx
+                        .table_row_block_range(line_no)
+                        .unwrap_or((line_no, line_no));
+                    let row_no = line_no.saturating_sub(blk_s);
+                    let row_count = blk_e.saturating_sub(blk_s).saturating_add(1);
+                    let append_after_header = row_no == 0
+                        && row_count > 1
                         && (line_no == min.line_no || whole_document_select);
                     // 从表中间起选（单行或多行）：在选中块「首行」单元格之后补 `|---|`（单行时也在内容下面）
                     let append_after_mid_first_line = !whole_document_select
-                        && table_info.table_row_index >= 1
+                        && row_no >= 1
                         && line_no == min.line_no;
                     if append_after_header || append_after_mid_first_line {
                         joins.push('\n');
@@ -927,7 +1065,11 @@ impl PghView {
                 return joins;
             }
 
-            let segmax = table_info.row_count * table_info.col_count - 1;
+            let row_count = self.pgh.len() / table_info.col_count.max(1);
+            if row_count == 0 || table_info.col_count == 0 {
+                return String::new();
+            }
+            let segmax = row_count * table_info.col_count - 1;
 
             let range = if line_no < min.line_no || line_no > max.line_no {
                 (0, 0)
@@ -936,7 +1078,7 @@ impl PghView {
                 (min.segment, max.segment)
             } else if line_no > min.line_no && line_no < max.line_no {
                 //middle line
-                (0, table_info.row_count * table_info.col_count - 1)
+                (0, row_count * table_info.col_count - 1)
             } else if line_no == max.line_no {
                 //last line
                 let end = (max.segment + table_info.col_count) / table_info.col_count
@@ -964,7 +1106,7 @@ impl PghView {
 
                     if i == 0 {
                         joins += "|";
-                        for col in c1.col..=c2.col {
+                        for _col in c1.col..=c2.col {
                             joins += "--|";
                         }
                         joins += "\n";
@@ -980,14 +1122,13 @@ impl PghView {
             let line_start_cursor = self.start_cursor_of_line(line_no);
             let is_full_line = min_cursor <= &line_start_cursor && max_cursor >= &line_end_cursor;
             // 多行 fenced 块在整篇导出时由 `Ctx::get_all_text` 合并输出围栏；此处仅单行块或局部选区
-            let single_row_block = self
-                .code_info
-                .as_ref()
+            let single_row_block = ctx
+                .code_info_of_line(line_no)
                 .map(|c| c.code_total_rows <= 1)
                 .unwrap_or(true);
             if is_full_line && single_row_block {
-                let lang = self.code_lang.as_deref().unwrap_or("");
-                format!("```{}\n{}\n```", lang, text)
+                let info_line = ctx.markdown_export_code_fence_info_line(line_no);
+                format!("```{}\n{}\n```", info_line, text)
             } else {
                 text
             }
@@ -1107,6 +1248,19 @@ impl PghView {
         rs
     }
 
+    /// 文本查找使用的线性文本。`TableRow` 不包含管道分隔符，以对齐 `text_*_index_to_cursor` 的 segment 拼接语义。
+    pub fn get_search_text(&self) -> String {
+        if self.is_table_row() {
+            let mut rs: String = Default::default();
+            for segment in &self.pgh {
+                rs += &segment.item.text();
+            }
+            rs
+        } else {
+            self.get_text()
+        }
+    }
+
     pub fn get_segment_type(&self, segment: usize) -> SegmentType {
         if let Some(seg) = self.pgh.get(segment) {
             seg.seg_type.clone()
@@ -1187,13 +1341,17 @@ impl PghView {
         cursor
     }
 
-    pub fn text_byte_index_to_cursor(&self, index: usize, line_no: usize) -> Cursor {
+    pub fn text_byte_index_to_cursor(&self, index: usize, line_no: usize, greedy: bool) -> Cursor {
         let mut cursor: Cursor = line_no.into();
         let mut sum_index_byte = 0;
         let last_seg = self.last_text_segment();
         'outer: for segment in &self.pgh[..last_seg + 1] {
             for (i, c) in segment.item.text().chars().enumerate() {
                 sum_index_byte += c.len_utf8();
+                if !greedy && sum_index_byte == index {
+                    cursor.culumn = i+1;
+                    break 'outer;
+                }
                 if sum_index_byte > index {
                     cursor.culumn = i;
                     break 'outer;
@@ -1254,15 +1412,20 @@ impl PghView {
         if ctx.get_line(line_no).is_none() {
             return None;
         }
+        if ctx
+            .get_line(line_no)
+            .map(|p| p.is_render_hidden())
+            .unwrap_or(false)
+        {
+            return Some(false);
+        }
         let is_line_content_changed = ctx.line_change_reset(line_no);
         let is_flash_changed = ctx.line_flash_reset(line_no);
         let is_changed = is_line_content_changed || is_flash_changed;
 
         let skip_markdown_parse = {
             let line = ctx.get_line(line_no)?;
-            line.pgh_type == PghType::CodeRow
-                || line.pgh_type == PghType::Table
-                || line.pgh_type == PghType::TableRow
+            line.pgh_type == PghType::CodeRow || line.pgh_type == PghType::TableRow
         };
         if skip_markdown_parse {
             // `line_flash_all` 只 bump `refresh_tick`：须把 flash 并入返回值，否则 CodeRow
@@ -1364,10 +1527,15 @@ impl PghView {
         top_rect.set_right(ctx.edit_right());
         top_rect.set_height(spacing_top);
         let mut response = ui.allocate_rect(top_rect, ctx.sense());
+        let mut focus_response = ui.allocate_rect(
+            Rect::from_min_max(top_rect.left_top(), top_rect.left_top()),
+            ctx.sense(),
+        );
         let mut handled = false;
 
         let mut images = vec![];
         let mut quote_indent_rect = None;
+        let mut outline_fold_collapsed = false;
         ui.horizontal_wrapped(|ui| {
             let mut row_rect = ui.cursor();
             row_rect.set_right(ctx.edit_right());
@@ -1376,10 +1544,13 @@ impl PghView {
             if is_heading && ctx.cfg().show_heading_section_numbers {
                 if let Some(entry) = ctx.toc_entry_for_line(line_no) {
                     let font = ctx.cfg().heading_font_id(entry.level);
-                    ui.label(
-                        RichText::new(format!("{} ", entry.section_number))
-                            .font(font)
-                            .color(ctx.cfg().weak_color()),
+                    focus_response |= ui.add(
+                        Label::new(
+                            RichText::new(format!("{} ", entry.section_number))
+                                .font(font)
+                                .color(ctx.cfg().weak_color()),
+                        )
+                        .sense(Sense::click()),
                     );
                 }
             }
@@ -1393,6 +1564,12 @@ impl PghView {
                     continue;
                 };
                 match seg_type {
+                    SegmentType::OutlineFold => {
+                        let (_fold_changed, collapsed, r) =
+                            PghOutlineFold::layout_paragraph(ui, ctx, line_no, segment);
+                        outline_fold_collapsed = collapsed;
+                        focus_response |= r;
+                    }
                     SegmentType::Text => {
                         let (text, job) = {
                             let p = ctx.get_line(line_no).unwrap();
@@ -1424,7 +1601,9 @@ impl PghView {
                         response |= PghIndent::layout_paragraph(ui, ctx, line_no, segment, ctx.cfg().indent_size_of_list);
                     }
                     SegmentType::CheckBox => {
-                        let (check_box_changed, _) = PghCheckBox::layout_paragraph(ui, ctx, line_no, segment);
+                        let (check_box_changed, r) =
+                            PghCheckBox::layout_paragraph(ui, ctx, line_no, segment);
+                        focus_response |= r;
                         if check_box_changed {
                             handled = true;
                         }
@@ -1440,7 +1619,8 @@ impl PghView {
                         response |= quote_response;
                     }
                     SegmentType::Break => {
-                        PghBreak::layout_paragraph(ui, ctx, line_no, segment);
+                        focus_response |=
+                            PghBreak::layout_paragraph(ui, ctx, line_no, segment);
                     }
                     SegmentType::Icon => {
                         let (r, is_clicked) = PghIcon::layout_paragraph(ui, ctx, line_no, segment);
@@ -1477,9 +1657,10 @@ impl PghView {
             if right_rect.left() < ctx.edit_right() {
                 right_rect.set_right(ctx.edit_right());
                 right_rect.set_height(response.rect.height() - spacing_top);
-                //log::debug!("add right rect: {:?}", right_rect);
-                //ui.painter().rect_stroke(right_rect, 0.0, Stroke::new(0.5, Color32::RED), StrokeKind::Outside);
                 response |= ui.allocate_rect(right_rect, ctx.sense());
+                //if outline_fold_collapsed {
+                //    PghOutlineFold::paint_collapsed_section_rule(ui, right_rect);
+                //}
             }
         });
 
@@ -1502,7 +1683,7 @@ impl PghView {
         let mut response = response.on_hover_cursor(CursorIcon::Text);
         //draw images
         Self::layout_images(ui, ctx, line_no, &images, &mut response);
-        LayoutResponse::new(response, handled)
+        LayoutResponse::new(response, focus_response, handled)
     }
 
     fn layout_images(
@@ -1529,7 +1710,7 @@ impl PghView {
     fn layout_expanded_text(
         ui: &mut Ui,
         ctx: &mut Ctx,
-        line_no: usize,
+        _line_no: usize,
         expanded_id: u64,
     ) -> Option<Response> {
         // 检查expanded_id是否在map中，只有存在的才显示
@@ -1566,9 +1747,10 @@ impl PghView {
         let expanded_text_id = ctx.get_line(line_no).and_then(|p| p.expanded_text_id);
 
         let mut layout_response = match pgh_type {
-            PghType::Table => Self::layout_table_line(ui, ctx, line_no),
             PghType::TableRow => Self::layout_table_row_line(ui, ctx, line_no),
-            PghType::CodeRow => Self::layout_code_line(ui, ctx, line_no, is_line_changed),
+            PghType::CodeRow => {
+                Self::layout_code_line(ui, ctx, line_no, is_line_changed)
+            }
             _ => Self::layout_sigle_line(ui, ctx, line_no, is_line_changed),
         };
         if let Some(expanded_id) = expanded_text_id {

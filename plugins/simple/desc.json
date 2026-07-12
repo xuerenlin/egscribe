@@ -18,6 +18,24 @@
   "triggers": [
     "line_changed",
     "file_opened"
+  ],
+  "commands": [
+    {
+      "command": "greet"
+    },
+    {
+      "command": "echo"
+    }
+  ],
+  "context_menus": [
+    {
+      "name": {
+        "zh-CN": "插件问候",
+        "en-US": "Plugin Greeting"
+      },
+      "visible": false,
+      "command": "greet"
+    }
   ]
 }
 

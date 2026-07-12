@@ -177,6 +177,29 @@ fn insert_text_mixed_heading_todo_table_preserves_blocks() {
 }
 
 #[test]
+fn insert_text_table_with_surrounding_text_auto_converts_table_rows() {
+    let mut ctx = md_ctx("");
+    assert_action_with_undo_redo(
+        &mut ctx,
+        &Action::insert_text("before\n| a | b |\n| --- | --- |\n| x | y |\nafter".into()),
+        "before\n|a|b|\n|--|--|\n|x|y|\nafter",
+    );
+}
+
+#[test]
+fn insert_text_single_line_pipe_row_triggers_table_check() {
+    let mut ctx = md_ctx("| a | b |\n|  |  |\n| x | y |");
+    let line_no = find_line_containing(&ctx, "|  |  |");
+    let n = ctx.get_line_text(line_no).chars().count();
+    set_selection_at_line_chars(&mut ctx, line_no, 0, n);
+    assert_action_with_undo_redo(
+        &mut ctx,
+        &Action::insert_text("| --- | --- |".into()),
+        "|a|b|\n|--|--|\n|x|y|",
+    );
+}
+
+#[test]
 fn insert_text_unicode_scalar_boundary() {
     let mut ctx = md_ctx("café");
     set_caret_at_line_char(&mut ctx, 0, 3);

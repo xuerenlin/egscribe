@@ -1,9 +1,9 @@
 use crate::medit::{TocNode, toc_entries_to_forest};
-use crate::store::Store;
+use crate::store::{OpenExecutionsViewRequest, Store};
 use crate::uicom::{IconName, icon_button_builder};
 use crate::i18n::tr;
 use eframe::egui::collapsing_header;
-use eframe::egui::{Color32, Frame, Rect, RichText, ScrollArea, Ui};
+use eframe::egui::{Align, Color32, Frame, Label, Rect, RichText, ScrollArea, Sense, Ui};
 
 // Side panel size tuning constants.
 const SIDE_PANEL_TOP_SPACE: f32 = 8.0;
@@ -11,6 +11,23 @@ const SIDE_PANEL_TAB_ICON_FONT_SIZE: f32 = 15.0;
 const SIDE_PANEL_TAB_INNER_MARGIN: f32 = 4.0;
 const SIDE_PANEL_INDEX_DEFAULT_WIDTH: f32 = 260.0;
 const SIDE_PANEL_COLLAPSED_DEFAULT_WIDTH: f32 = SIDE_PANEL_TAB_ICON_FONT_SIZE + SIDE_PANEL_TAB_INNER_MARGIN * 2.0;
+
+/// 纵向居中目录项：矩形横轴用当前视口宽度，避免连带横向居中拉动水平滚动条。
+fn scroll_toc_leaf_into_view_centered_y(ui: &Ui, response: &eframe::egui::Response) {
+    let wide = Rect::from_x_y_ranges(ui.clip_rect().x_range(), response.rect.y_range());
+    ui.scroll_to_rect(wide, Some(Align::Center));
+}
+
+/// 目录行：选中时仅改字色 + 粗体，不用 `selectable_label` 的整行填充底。
+fn toc_entry_rich_text(ui: &Ui, selected: bool, text: &str) -> RichText {
+    if selected {
+        RichText::new(text)
+            .strong()
+            .color(ui.style().visuals.selection.stroke.color)
+    } else {
+        RichText::new(text)
+    }
+}
 
 /// 侧边栏页面类型
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -21,10 +38,18 @@ pub enum SidePanelPage {
     Plugins,
     /// 当前文档 Markdown 目录
     Outline,
+    /// 插件执行历史页面
+    Executions,
 }
 
 /// Tab：`(页面, 图标, i18n key（传给 tr）)`
 type TabInfo = (SidePanelPage, IconName, &'static str);
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ExecutionsView {
+    Tasks,
+    Notifications,
+}
 
 /// 侧边栏管理器
 pub struct SidePanel {
@@ -32,6 +57,12 @@ pub struct SidePanel {
     current_page: SidePanelPage,
     /// Tab 按钮信息列表
     tabs: Vec<TabInfo>,
+    /// Executions 页面内部视图
+    executions_view: ExecutionsView,
+    /// 目录侧栏：上次为跟随光标而 `scroll_to_me` 的标题行；仅当与当前命中叶子行号变化时再次滚动，避免每帧重滚把用户拖动的卷轴拉回去
+    outline_toc_autoscroll_line: Option<usize>,
+    /// 与上项对应，用于切换打开文档时重置
+    outline_toc_autoscroll_path: Option<String>,
 }
 
 impl SidePanel {
@@ -54,12 +85,34 @@ impl SidePanel {
                     IconName::icon_puzzle,
                     "sidepanel.tab.plugins",
                 ),
+                (
+                    SidePanelPage::Executions,
+                    IconName::icon_functions,
+                    "sidepanel.tab.plugin_executions",
+                ),
             ],
+            executions_view: ExecutionsView::Tasks,
+            outline_toc_autoscroll_line: None,
+            outline_toc_autoscroll_path: None,
         }
+    }
+
+    #[allow(dead_code)]
+    pub fn open_plugins_page(&mut self, store: &mut Store) {
+        self.current_page = SidePanelPage::Plugins;
+        store.config_update_show_index_window(true);
     }
     
     /// 显示侧边栏
     pub fn show(&mut self, store: &mut Store, ctx: &eframe::egui::Context) {
+        if let Some(request) = store.take_open_executions_view_request() {
+            self.current_page = SidePanelPage::Executions;
+            self.executions_view = match request {
+                OpenExecutionsViewRequest::Tasks => ExecutionsView::Tasks,
+                OpenExecutionsViewRequest::Notifications => ExecutionsView::Notifications,
+            };
+            store.config_update_show_index_window(true);
+        }
         if store.note_space.is_show_index_window() {
             eframe::egui::SidePanel::left("side_panel_index_window")
                 .resizable(true)
@@ -163,6 +216,9 @@ impl SidePanel {
                     SidePanelPage::Plugins => {
                         self.show_plugins_page(store, ui);
                     }
+                    SidePanelPage::Executions => {
+                        self.show_plugin_executions_page(store, ui);
+                    }
                 }
             });
         });
@@ -191,15 +247,25 @@ impl SidePanel {
             }
 
             let storage_key = f.path();
+            if self.outline_toc_autoscroll_path.as_deref() != Some(storage_key.as_str()) {
+                self.outline_toc_autoscroll_path = Some(storage_key.clone());
+                self.outline_toc_autoscroll_line = None;
+            }
             let show_section_numbers = ctx.cfg().show_heading_section_numbers;
-            let forest = toc_entries_to_forest(ctx.toc_entries());
+            let cursor_line = ctx.cursor2().line_no;
+            let forest = toc_entries_to_forest(ctx.toc_entries(), cursor_line);
+            let mut toc_cursor_leaf_line = None::<usize>;
             self.render_toc_nodes(
                 ui,
                 &storage_key,
                 &forest,
                 &mut jump_line,
                 show_section_numbers,
+                &mut toc_cursor_leaf_line,
             );
+            if toc_cursor_leaf_line.is_none() {
+                self.outline_toc_autoscroll_line = None;
+            }
         }
 
         if let Some(line) = jump_line {
@@ -213,12 +279,13 @@ impl SidePanel {
 
     /// 目录树：有子标题的节点用 [`collapsing_header::CollapsingState`]，与 `space::show_sub_index` 相同套路。
     fn render_toc_nodes(
-        &self,
+        &mut self,
         ui: &mut Ui,
         storage_key: &str,
         nodes: &[TocNode],
         jump_line: &mut Option<usize>,
         show_section_numbers: bool,
+        toc_cursor_leaf_line: &mut Option<usize>,
     ) {
         for node in nodes {
             let label = if show_section_numbers {
@@ -231,14 +298,30 @@ impl SidePanel {
                 storage_key,
                 node.entry.line_no
             ));
+            let selected = node.cursor_in_section;
 
             if node.children.is_empty() {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 2.0;
                     // 与 `CollapsingState::show_button_indented` 占用的 `spacing.indent` 宽度对齐
                     ui.add_space(ui.spacing().indent);
-                    if ui.selectable_label(false, &label).clicked() {
+                    let response = ui.add(
+                        Label::new(toc_entry_rich_text(ui, selected, &label))
+                            .sense(Sense::click())
+                            .selectable(false),
+                    );
+                    if response.clicked() {
                         *jump_line = Some(node.entry.line_no);
+                    }
+                    if selected {
+                        *toc_cursor_leaf_line = Some(node.entry.line_no);
+                        if self.outline_toc_autoscroll_line != Some(node.entry.line_no) {
+                            let clip = ui.clip_rect();
+                            if !response.rect.intersects(clip) {
+                                scroll_toc_leaf_into_view_centered_y(ui, &response);
+                            }
+                            self.outline_toc_autoscroll_line = Some(node.entry.line_no);
+                        }
                     }
                 });
             } else {
@@ -247,7 +330,14 @@ impl SidePanel {
                 let header_res = ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 2.0;
                     state.show_toggle_button(ui, collapsing_header::paint_default_icon);
-                    if ui.selectable_label(false, &label).clicked() {
+                    if ui
+                        .add(
+                            Label::new(toc_entry_rich_text(ui, selected, &label))
+                                .sense(Sense::click())
+                                .selectable(false),
+                        )
+                        .clicked()
+                    {
                         *jump_line = Some(node.entry.line_no);
                     }
                 });
@@ -258,6 +348,7 @@ impl SidePanel {
                         &node.children,
                         jump_line,
                         show_section_numbers,
+                        toc_cursor_leaf_line,
                     );
                 });
             }
@@ -302,6 +393,164 @@ impl SidePanel {
             }
         }
     }
+
+    fn show_plugin_executions_page(&mut self, store: &mut Store, ui: &mut Ui) {
+        self.show_executions_view_switch(ui);
+        ui.add_space(8.0);
+        match self.executions_view {
+            ExecutionsView::Tasks => self.show_execution_tasks_list(store, ui),
+            ExecutionsView::Notifications => self.show_execution_notifications_list(store, ui),
+        }
+    }
+
+    fn show_executions_view_switch(&mut self, ui: &mut Ui) {
+        ui.with_layout(eframe::egui::Layout::top_down(eframe::egui::Align::Center), |ui| {
+            ui.horizontal(|ui| {
+                let task_color = if self.executions_view == ExecutionsView::Tasks {
+                    ui.style().visuals.selection.bg_fill
+                } else {
+                    ui.style().visuals.text_color()
+                };
+                let notify_color = if self.executions_view == ExecutionsView::Notifications {
+                    ui.style().visuals.selection.bg_fill
+                } else {
+                    ui.style().visuals.text_color()
+                };
+                let task_btn = icon_button_builder(ui)
+                    .icon(IconName::icon_functions)
+                    .hover_text(tr("sidepanel.executions.switch.tasks"))
+                    .fg(task_color)
+                    .build_tool();
+                if task_btn.clicked() {
+                    self.executions_view = ExecutionsView::Tasks;
+                }
+                let notify_btn = icon_button_builder(ui)
+                    .icon(IconName::icon_notification)
+                    .hover_text(tr("sidepanel.executions.switch.notifications"))
+                    .fg(notify_color)
+                    .build_tool();
+                if notify_btn.clicked() {
+                    self.executions_view = ExecutionsView::Notifications;
+                }
+            });
+        });
+    }
+
+    fn show_execution_tasks_list(&mut self, store: &mut Store, ui: &mut Ui) {
+        use crate::plugin::manager::PluginExecStatus;
+
+        let pending = store.plugin_manager.pending_exec_count();
+        let records = store.plugin_manager.recent_exec_records();
+
+        ui.label(
+            RichText::new(format!(
+                "{} ({} {})",
+                tr("sidepanel.executions.title"),
+                tr("sidepanel.executions.pending_count"),
+                pending
+            ))
+            .strong(),
+        );
+        ui.separator();
+
+        let scroll_h = (ui.clip_rect().bottom() - ui.cursor().top()).max(48.0);
+        ScrollArea::vertical()
+            .id_salt("sidepanel_exec_tasks_list")
+            .auto_shrink(false)
+            .max_height(scroll_h)
+            .show(ui, |ui| {
+                if records.is_empty() {
+                    ui.label(tr("sidepanel.executions.empty"));
+                    return;
+                }
+
+                for (idx, record) in records.into_iter().enumerate() {
+                    let status = match record.status {
+                        PluginExecStatus::Running => tr("sidepanel.executions.status.running"),
+                        PluginExecStatus::Success => tr("sidepanel.executions.status.success"),
+                        PluginExecStatus::Failed => tr("sidepanel.executions.status.failed"),
+                        PluginExecStatus::Timeout => tr("sidepanel.executions.status.timeout"),
+                    };
+                    let elapsed = record
+                        .duration_ms
+                        .map(|ms| format!("{} ms", ms))
+                        .unwrap_or_else(|| "-".to_string());
+                    let time_tail = match &record.current_outline_name {
+                        Some(name) => format!("{} · {}", name, elapsed),
+                        None => elapsed,
+                    };
+                    let title = format!(
+                        "{}  [{}] {} ({})",
+                        status, record.plugin_id, record.command, time_tail
+                    );
+                    eframe::egui::CollapsingHeader::new(title)
+                        .id_salt(format!("exec_record_{}_{}", record.request_id, idx))
+                        .show(ui, |ui| {
+                            ui.label(format!(
+                                "{} {}",
+                                tr("sidepanel.executions.params"),
+                                record.params_preview
+                            ));
+                            if let Some(preview) = &record.response_data_preview {
+                                ui.label(format!(
+                                    "{} {}",
+                                    tr("sidepanel.executions.result"),
+                                    preview
+                                ));
+                            }
+                            if let Some(err) = &record.error_message {
+                                ui.colored_label(
+                                    Color32::RED,
+                                    format!("{} {}", tr("sidepanel.executions.error"), err),
+                                );
+                            }
+                            ui.small(format!("request_id: {}", record.request_id));
+                        });
+                    ui.add_space(4.0);
+                }
+            });
+    }
+
+    fn show_execution_notifications_list(&mut self, store: &mut Store, ui: &mut Ui) {
+        let notifications = store.recent_notifications();
+        ui.label(RichText::new(tr("notifications.window.title")).strong());
+        ui.separator();
+        let scroll_h = (ui.clip_rect().bottom() - ui.cursor().top()).max(48.0);
+        ScrollArea::vertical()
+            .id_salt("sidepanel_exec_notifications_list")
+            .auto_shrink(false)
+            .max_height(scroll_h)
+            .show(ui, |ui| {
+                if notifications.is_empty() {
+                    ui.label(tr("notifications.window.empty"));
+                    return;
+                }
+                for (idx, item) in notifications.iter().enumerate() {
+                    let title = item.list_title();
+                    let unique_id = item
+                        .request_id
+                        .clone()
+                        .unwrap_or_else(|| format!("{}_{}", item.plugin_id, idx));
+                    eframe::egui::CollapsingHeader::new(title)
+                        .id_salt(format!("notify_record_{}_{}", unique_id, idx))
+                        .show(ui, |ui| {
+                            if let Some(cmd) = &item.command {
+                                ui.label(format!("{} {}", tr("notifications.item.command"), cmd));
+                            }
+                            ui.label(format!(
+                                "{} {}",
+                                tr("notifications.item.message"),
+                                item.message
+                            ));
+                            if let Some(req_id) = &item.request_id {
+                                ui.small(format!("request_id: {}", req_id));
+                            }
+                        });
+
+                    ui.add_space(4.0);
+                }
+            });
+    }
     
     /// 显示插件日志（保存为 .log 文件并打开）
     fn show_plugin_log(store: &mut Store, plugin_id: &str) {
@@ -330,9 +579,13 @@ impl SidePanel {
         
         // 将日志内容合并为字符串
         let log_content = if logs.is_empty() {
-            format!("# 插件日志: {}\n暂无日志记录。\n", plugin_id)
+            format!(
+                "{}\n{}\n",
+                format!("{} {}", tr("sidepanel.plugin_log.header"), plugin_id),
+                tr("sidepanel.plugin_log.empty")
+            )
         } else {
-            let mut content = format!("# 插件日志: {}\n", plugin_id);
+            let mut content = format!("{} {}\n", tr("sidepanel.plugin_log.header"), plugin_id);
             for log_entry in logs {
                 content.push_str(&log_entry);
                 content.push_str("\n");

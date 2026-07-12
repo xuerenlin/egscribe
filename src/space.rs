@@ -663,6 +663,7 @@ impl NoteSpace {
 
         let _ = fs::create_dir_all(&self.work_dir);
         let _ = fs::create_dir_all(self.image_path());
+        let _ = fs::create_dir_all(crate::util::cache_dir(&self.work_dir));
     }
 
     //return links of the file

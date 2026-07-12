@@ -3,9 +3,7 @@ use crate::medit::{Ctx, Cursor};
 use crate::uicom::galley_builder;
 use core::f32;
 use eframe::egui::epaint::text::{LayoutJob};
-use eframe::egui::{
-    epaint, Align, Color32, FontSelection, Galley, NumExt, Pos2, Rect, Response, Ui, Vec2
-};
+use eframe::egui::{epaint, Align, Color32, FontSelection, Galley, NumExt, Pos2, Rect, Response, Ui, Vec2};
 use std::sync::Arc;
 
 #[derive(Clone, Copy)]
@@ -183,7 +181,7 @@ impl PghText {
         spacing: TextSpacing,
     ) -> (Pos2, Arc<Galley>, Response) {
         
-        let cursor = ui.cursor();
+        let cursor = ui.cursor();    
         let pos = Pos2{x: spacing.outer_rect.left(), y: cursor.top()};
 
         let mut layout_job = 
@@ -198,7 +196,12 @@ impl PghText {
         
         layout_job.wrap.max_width = spacing.warp_width;
         layout_job.wrap.break_anywhere = true;
-        layout_job.first_row_min_height = cursor.height();
+        // Grid row height must not become `first_row_min_height` (see epaint `galley_from_rows`).
+        layout_job.first_row_min_height = if spacing.once_allocate {
+            0.0
+        } else {
+            cursor.height()
+        };
         layout_job.halign = Align::Min;
         layout_job.justify = false;
         
@@ -227,6 +230,7 @@ impl PghText {
         //need onlly allocate only one time in table
         if spacing.once_allocate {
             let response = ui.allocate_rect(rsp_rect, ctx.sense());
+            //ui.painter().rect_stroke(rsp_rect, 0.0, Stroke::new(1.0, Color32::RED), StrokeKind::Outside);
             (pos, galley, response)
         } else {
             let mut response = ui.allocate_rect(Rect::from_min_max(spacing.outer_rect.left_top(), spacing.outer_rect.left_top()), ctx.sense());
@@ -406,7 +410,7 @@ impl PghItem for PghText {
 
     fn cursor_from_pos(&self, line_no: usize, segment: usize, pos: &Pos2) -> Option<Cursor> {
         if let Some(plist) = &self.char_rect {
-            for (i, c_rect) in plist.into_iter().enumerate() {
+            for (_i, c_rect) in plist.into_iter().enumerate() {
                 let rect = c_rect.rect;
                 let middle = if c_rect.c == '\0' {
                     rect.min.x + rect.width()
@@ -495,16 +499,3 @@ impl PghItem for PghText {
     }
 }
 
-impl PghText {
-    //replace tab to space
-    fn view_text(&self) -> String {
-        let left = self
-            .text
-            .chars()
-            .enumerate()
-            .filter_map(|(i, chr)| Some("".to_string()))
-            .collect::<String>();
-
-        left
-    }
-}

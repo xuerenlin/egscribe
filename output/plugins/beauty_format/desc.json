@@ -1,0 +1,36 @@
+{
+  "id": "beauty_format",
+  "name": {
+    "zh-CN": "JSON 格式化",
+    "en-US": "JSON Formatter"
+  },
+  "description": {
+    "zh-CN": "将选中的 JSON 文本格式化为缩进美观的形式",
+    "en-US": "Format selected JSON text with pretty indentation"
+  },
+  "exe_path": "beauty_format/beauty_format",
+  "args": [],
+  "config": {},
+  "enabled": true,
+  "auto_start": true,
+  "triggers": [],
+  "commands": [
+    {
+      "command": "format_json"
+    }
+  ],
+  "context_menus": [
+    {
+      "name": {
+        "zh-CN": "JSON 格式化",
+        "en-US": "Format JSON"
+      },
+      "command": "format_json",
+      "sort_value": 30,
+      "supports_batch_concurrent": false,
+      "params": {
+        "selected_text": "$editor_selected_text"
+      }
+    }
+  ]
+}

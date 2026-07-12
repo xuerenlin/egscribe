@@ -1,0 +1,80 @@
+{
+  "id": "llm_agent",
+  "name": {
+    "zh-CN": "大模型调用插件",
+    "en-US": "LLM Agent Plugin"
+  },
+  "description": {
+    "zh-CN": "这是一个AI助手插件，可以调用大模型对文档内容进行补充和修改",
+    "en-US": "This is an AI assistant plugin that can call a large language model to supplement and modify document content."
+  },
+  "exe_path": "llm_agent/llm_agent",
+  "args": [],
+  "config": {
+    "max_concurrency": 5
+  },
+  "enabled": true,
+  "auto_start": true,
+  "triggers": [],
+  "commands": [
+    {
+      "command": "llm_call_test",
+      "preamble": "你是一个专业的Markdown文档处理助手。",
+      "prompt_file": "llm_call_prompt_test.md"
+    },
+    {
+      "command": "llm_call_coscat_jiangsu",
+      "preamble": "你是一个专业的Markdown文档处理助手，擅长软件需求流程分析和文档补充。",
+      "prompt_file": "llm_call_prompt_coscat_jiangsu.md"
+    },
+    {
+      "command": "llm_test_echo"
+    }
+  ],
+  "context_menus": [
+    {
+      "name": {
+        "zh-CN": "LLM 调用测试",
+        "en-US": "LLM Call Test"
+      },
+      "visible": false,
+      "sort_value": 0,
+      "supports_batch_concurrent": true,
+      "command": "llm_call_test",
+      "params": {
+        "current_outline_name": "$current_outline_name",
+        "current_outline_path": "$current_outline_path",
+        "current_outline_content": "$current_outline_content"
+      }
+    },
+    {
+      "name": {
+        "zh-CN": "LLM CoscatJiangSu",
+        "en-US": "LLM CoscatJiangSu"
+      },
+      "sort_value": 10,
+      "supports_batch_concurrent": true,
+      "command": "llm_call_coscat_jiangsu",
+      "params": {
+        "current_outline_name": "$current_outline_name",
+        "current_outline_path": "$current_outline_path",
+        "current_outline_content": "$current_outline_content"
+      }
+    },
+    {
+      "name": {
+        "zh-CN": "LLM Test Echo",
+        "en-US": "LLM Test Echo"
+      },
+      "sort_value": 20,
+      "supports_batch_concurrent": true,
+      "command": "llm_test_echo",
+      "params": {
+        "current_outline_name": "$current_outline_name",
+        "current_outline_path": "$current_outline_path",
+        "current_outline_content": "$current_outline_content"
+      }
+    }
+  ]
+}
+

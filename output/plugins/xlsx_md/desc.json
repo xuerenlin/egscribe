@@ -1,0 +1,42 @@
+{
+  "id": "xlsx_md",
+  "name": {
+    "zh-CN": "XLSX 转 Markdown 插件",
+    "en-US": "XLSX to Markdown Plugin"
+  },
+  "description": {
+    "zh-CN": "接收 hex_file_to_md 命令，将 xlsx 文件转换为 markdown 并通知主程序打开。",
+    "en-US": "Handles hex_file_to_md command, converts xlsx file to markdown, and asks app to open it."
+  },
+  "exe_path": "xlsx_md/xlsx_md",
+  "args": [],
+  "config": {},
+  "enabled": true,
+  "auto_start": true,
+  "triggers": [],
+  "commands": [
+    {
+      "command": "hex_file_to_md",
+      "extensions": ["xlsx", "xlsm"]
+    },
+    {
+      "command": "export_table_to_xlsx",
+      "extensions": ["xlsx", "xlsm"]
+    }
+  ],
+  "context_menus": [
+    {
+      "name": {
+        "zh-CN": "合并表格并导出到Excel",
+        "en-US": "Merge Table and Export to Excel"
+      },
+      "command": "export_table_to_xlsx",
+      "sort_value": 200,
+      "supports_batch_concurrent": false,
+      "params": {
+        "current_outline_merged_table": "$current_outline_merged_table",
+        "new_file_path": "$new_file_path"
+      }
+    }
+  ]
+}

@@ -14,7 +14,7 @@ The core idea is: **manage notes in the `note` directory**, while still being ab
 2. Create a new note in the left **Notes** panel. It is saved as `note/<name>.md` by default.
 3. Press `Ctrl+S` to save. If auto-save is enabled, data is saved at the configured interval.
 
-> For first-time use, open this file and follow along while trying each feature.
+>For first-time use, open this file and follow along while trying each feature.
 
 ---
 
@@ -61,15 +61,15 @@ Use `Esc` to quickly show/hide the side panel.
 
 ## Common Shortcuts
 
-| Shortcut | Action |
-| -- | -- |
-| `Ctrl+S` | Save current document |
-| `Ctrl+F` | Open find/replace window (tries to preload selected text) |
-| `Ctrl+Z` / `Ctrl+Y` | Undo / Redo |
-| `Ctrl+A` | Select all |
-| `Ctrl+Enter` | Exit table/code block and continue normal paragraph |
-| `Esc` | Show/Hide left side panel |
-| More | Check corresponding shortcuts in the context menu |
+|Shortcut|Action|
+|--|--|
+|`Ctrl+S`|Save current document|
+|`Ctrl+F`|Open find/replace window (tries to preload selected text)|
+|`Ctrl+Z` / `Ctrl+Y`|Undo / Redo|
+|`Ctrl+A`|Select all|
+|`Ctrl+Enter`|Exit table/code block and continue normal paragraph|
+|`Esc`|Show/Hide left side panel|
+|More|Check corresponding shortcuts in the context menu|
 
 **The context menu supports common Markdown insertions**: headings, bold, italic, strikethrough, links, inline code, lists, TODO, quote, table, code block, horizontal rule, etc.
 
@@ -132,7 +132,7 @@ This is `inline code`.
 
 ### Quote, Horizontal Rule, Link, Image
 
-> This is a quote block
+>This is a quote block
 > Second quote line
 
 ---
@@ -158,11 +158,11 @@ Notes:
 ### Tables
 
 Basic table example:
-| Feature | Shortcut | Description |
-| -- | -- | -- |
-| Save | Ctrl+S | Save current document |
-| Find | Ctrl+F | Open find/replace |
-| Side panel | Esc | Show/Hide side panel |
+|Feature|Shortcut|Description|
+|--|--|--|
+|Save|Ctrl+S|Save current document|
+|Find|Ctrl+F|Open find/replace|
+|Side panel|Esc|Show/Hide side panel|
 
 Table editing notes:
 - Once recognized as a table, visual editing is available (insert/delete rows and columns).

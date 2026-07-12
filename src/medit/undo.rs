@@ -13,6 +13,7 @@ pub enum DoItem {
     Insert(DoLine),
     Delete(DoLine),
     Update(DoLine),
+    ReplaceAll(Vec<PghView>),
 }
 
 #[derive(Clone, Debug)]
@@ -56,6 +57,11 @@ impl DoCmd {
 
     pub fn push_update(&mut self, line: usize, pgh_view: Option<PghView>) {
         let item = DoItem::Update(DoLine{line, pgh_view});
+        self.items.push(item);
+    }
+
+    pub fn push_replace_all(&mut self, pgh_views: Vec<PghView>) {
+        let item = DoItem::ReplaceAll(pgh_views);
         self.items.push(item);
     }
 

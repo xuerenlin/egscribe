@@ -27,6 +27,8 @@ fn default_table_frame_style() -> crate::medit::pgh::TableFrameStyle {
 }
 fn default_show_heading_section_numbers() -> bool { true }
 fn default_show_table_row_no() -> bool { true }
+fn default_show_table_head_checkbox() -> bool { true }
+fn default_plantuml_jar_path() -> Option<String> { None }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Config {
@@ -76,6 +78,10 @@ pub struct Config {
     pub show_heading_section_numbers: bool, // Markdown 标题行首多级序号（编辑区与侧栏目录）
     #[serde(default = "default_show_table_row_no")]
     pub show_table_row_no: bool, // Markdown 表格左侧行号列（表头格为 #）
+    #[serde(default = "default_show_table_head_checkbox")]
+    pub show_table_head_checkbox: bool, // Markdown 表头列前显示 checkbox（含行号列表头）
+    #[serde(default = "default_plantuml_jar_path")]
+    pub plantuml_jar_path: Option<String>, // PlantUML jar 路径（为空时按默认回退路径查找）
 }
 
 impl Default for Config {
@@ -104,6 +110,8 @@ impl Default for Config {
             table_frame_style: default_table_frame_style(),
             show_heading_section_numbers: true,
             show_table_row_no: default_show_table_row_no(),
+            show_table_head_checkbox: default_show_table_head_checkbox(),
+            plantuml_jar_path: default_plantuml_jar_path(),
         }
     }
 }
