@@ -4,6 +4,7 @@ egscribe is a local-first Markdown note-taking app and lightweight text editor.
 The core idea is: **manage notes in the `note` directory**, while still being able to open external plain text files.
 
 ![screenshot](https://gitee.com/linxueren_0/egscribe/raw/master/screenshot.png)
+![screenshot](https://github.com/xuerenlin/egscribe/blob/main/screenshot.png?raw=true)
 
 ---
 
